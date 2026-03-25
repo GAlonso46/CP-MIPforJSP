@@ -39,7 +39,6 @@ class JSSPMilpModel:
       - s: Dict[(i,k,m), setup_time] sequence-dependent setup on machine m
       - V: Big-M constant (required)
 
-    The class does not invent constraints outside the provided formulation.
     """
 
     def __init__(self, data: Dict[str, Any], gurobi_params: Dict[str, Any] = None):
@@ -207,6 +206,10 @@ class JSSPMilpModel:
                     # sum over workers for i on machine mm
                     xi_keys = [(i, mm, ww) for ww in self.W_t.get(i, []) if (i, mm, ww) in self.x]
                     xk_keys = [(k, mm, ww) for ww in self.W_t.get(k, []) if (k, mm, ww) in self.x]
+                    
+                    sum_xi = gp.quicksum(self.x[k_] for k_ in xi_keys) if xi_keys else 0
+                    sum_xk = gp.quicksum(self.x[k_] for k_ in xk_keys) if xk_keys else 0
+                    
                     if xi_keys:
                         m.addConstr(self.y[(i, k, mm)] <= gp.quicksum(self.x[k_] for k_ in xi_keys), name=f"y_le_xi_{i}_{k}_{mm}")
                     else:
@@ -219,6 +222,12 @@ class JSSPMilpModel:
 
                     # y_{i,k}^m + y_{k,i}^m <= 1
                     m.addConstr(self.y[(i, k, mm)] + self.y[(k, i, mm)] <= 1, name=f"y_antisym_{i}_{k}_{mm}")
+
+                    # y_{i,k}^m + y_{k,i}^m >= sum(x_i) + sum(x_k) - 1
+                    m.addConstr(
+                        self.y[(i, k, mm)] + self.y[(k, i, mm)] >= sum_xi + sum_xk - 1, 
+                        name=f"y_force_{i}_{k}_{mm}"
+                    )
 
         # 6. Machine Disjunction with SDST (Big-M):
         # S_k >= C_i + s_{i,k,m} * y_{i,k}^m - V * (1 - y_{i,k}^m)
@@ -245,6 +254,10 @@ class JSSPMilpModel:
                 for ww in self.workers:
                     xi_keys = [(i, mm, ww) for mm in self.M_t.get(i, []) if (i, mm, ww) in self.x]
                     xk_keys = [(k, mm, ww) for mm in self.M_t.get(k, []) if (k, mm, ww) in self.x]
+                    
+                    sum_xi_w = gp.quicksum(self.x[k_] for k_ in xi_keys) if xi_keys else 0
+                    sum_xk_w = gp.quicksum(self.x[k_] for k_ in xk_keys) if xk_keys else 0
+                    
                     if xi_keys:
                         m.addConstr(self.z[(i, k, ww)] <= gp.quicksum(self.x[k_] for k_ in xi_keys), name=f"z_le_xi_{i}_{k}_{ww}")
                     else:
@@ -256,6 +269,12 @@ class JSSPMilpModel:
 
                     # z_{i,k}^w + z_{k,i}^w <= 1
                     m.addConstr(self.z[(i, k, ww)] + self.z[(k, i, ww)] <= 1, name=f"z_antisym_{i}_{k}_{ww}")
+
+                    # z_{i,k}^w + z_{k,i}^w >= sum(x_i) + sum(x_k) - 1
+                    m.addConstr(
+                        self.z[(i, k, ww)] + self.z[(k, i, ww)] >= sum_xi_w + sum_xk_w - 1, 
+                        name=f"z_force_{i}_{k}_{ww}"
+                    )
 
         # 8. Worker Disjunction (Big-M):
         # S_k >= C_i - V * (1 - z_{i,k}^w)
@@ -315,4 +334,3 @@ class JSSPMilpModel:
         return {"status": status_str, "gurobi_status": status, "obj_val": obj}
 
 
-# End of file
