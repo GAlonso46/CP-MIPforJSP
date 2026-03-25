@@ -165,26 +165,27 @@ class JSSPCpModel:
                 raise ValueError(f"Task {t} has no eligible (machine,worker) modes")
             model.AddExactlyOne(mode_pres_list)
 
-            # 2. Task-Mode Synchronization using Big-M conditional inequalities
-            # For each mode presence p: if p==1 then start_t == start_mode and end_t == end_mode
-            for (tt, mm, ww), pres in list(self.mode_pres.items()):
+            # 2. Task-Mode Synchronization
+            # Link the main task interval (s_t, e_t, len_t) with the selected mode.
+            # If a specific mode (machine, worker) is present, the task must 
+            # assume that mode's start, end, and duration.
+            for (tt, mm, ww), pres in self.mode_pres.items():
                 if tt != t:
                     continue
+                
                 ms = self.mode_start[(tt, mm, ww)]
                 me = self.mode_end[(tt, mm, ww)]
-                # start_t - ms >= -M*(1-pres)  <=> start_t - ms + M*(1-pres) >= 0
-                model.Add(self.task_start[t] - ms + M - M * pres >= 0)
-                # start_t - ms <= M*(1-pres) <=> start_t - ms - M*(1-pres) <= 0
-                model.Add(self.task_start[t] - ms - M + M * pres <= 0)
-                # end_t - me >= -M*(1-pres)
-                model.Add(self.task_end[t] - me + M - M * pres >= 0)
-                # end_t - me <= M*(1-pres)
-                model.Add(self.task_end[t] - me - M + M * pres <= 0)
-                # also link length: len_t == dur when present
-                # len_t - dur <= M*(1-pres) and len_t - dur >= -M*(1-pres)
-                model.Add(len_t - dur_var + M - M * pres >= 0)
-                model.Add(len_t - dur_var - M + M * pres <= 0)
+                dur_var = self.p.get((tt, mm, ww))
 
+                # If pres is true, then task_start == mode_start
+                model.Add(self.task_start[t] == ms).OnlyEnforceIf(pres)
+                
+                # If pres is true, then task_end == mode_end
+                model.Add(self.task_end[t] == me).OnlyEnforceIf(pres)
+                
+                # If pres is true, the task length must match the mode duration
+                model.Add(len_t == dur_var).OnlyEnforceIf(pres)
+                
         # 3. Precedence & Time Lags: Start(I_k) >= End(I_i) + L_{ik}
         for (i, k) in self.P:
             lag = self.L.get((i, k), 0)
@@ -235,40 +236,45 @@ class JSSPCpModel:
                     b = model.NewBoolVar(f"arc_m_{mm}_{u}_{v}")
                     arcs.append((u, v, b))
                     arc_var[(u, v)] = b
-                    # consistency constraints for real-real arcs
-                    if u != 0 and v != 0:
-                        mode_u = node_to_mode[u]
-                        mode_v = node_to_mode[v]
-                        pres_u = self.mode_pres[mode_u]
-                        pres_v = self.mode_pres[mode_v]
-                        # if arc active then both modes must be selected
-                        # pres_u >= b  <=> b => pres_u
-                        model.Add(pres_u >= b)
-                        model.Add(pres_v >= b)
-                        # SDST separation: start_v >= end_u + s_{u,v,m}  only if arc active
-                        s_uv = self.s.get((mode_u[0], mode_v[0], mm), 0)
-                        start_v = self.mode_start[mode_v]
-                        end_u = self.mode_end[mode_u]
-                        # enforce only when arc is active
-                        model.Add(start_v >= end_u + s_uv).OnlyEnforceIf(b)
-                    elif u != 0 and v == 0:
-                        # arc to dummy: if active then mode u must be selected
-                        mode_u = node_to_mode[u]
-                        pres_u = self.mode_pres[mode_u]
-                        model.Add(pres_u >= b)
-                    elif u == 0 and v != 0:
-                        mode_v = node_to_mode[v]
-                        pres_v = self.mode_pres[mode_v]
-                        model.Add(pres_v >= b)
+                    if u == v:
+                        # --- Self-Loops ---
+                        if u != 0:
+                            # If it is a real node, the self-loop is activated IF AND ONLY IF the NO mode is present
+                            mode_u = node_to_mode[u]
+                            pres_u = self.mode_pres[mode_u]
+                            model.Add(pres_u == 0).OnlyEnforceIf(b)
+                            model.Add(b == 1).OnlyEnforceIf(pres_u.Not()) # Accelerates propagation
+                        else:
+                            # Self-loop of the dummy node (0 to 0): no extra logic required
+                            pass
                     else:
-                        # u == 0 and v == 0: dummy self-loop, no extra constraints
-                        pass
-                    # Self-loops on real nodes force presence to 0 when loop active
-                    if u == v and u != 0:
-                        mode_u = node_to_mode[u]
-                        pres_u = self.mode_pres[mode_u]
-                        # if self-loop is active then mode cannot be present
-                        model.Add(pres_u == 0).OnlyEnforceIf(b)
+                        # --- CROSS ARCS (u != v) ---
+                        if u != 0 and v != 0:
+                            # Real -> Real
+                            mode_u = node_to_mode[u]
+                            mode_v = node_to_mode[v]
+                            pres_u = self.mode_pres[mode_u]
+                            pres_v = self.mode_pres[mode_v]
+                            
+                            # If the arc is used, BOTH modes MUST be present
+                            model.AddImplication(b, pres_u)
+                            model.AddImplication(b, pres_v)
+                            
+                            # Time separation with Setup (SDST)
+                            s_uv = self.s.get((mode_u[0], mode_v[0], mm), 0)
+                            start_v = self.mode_start[mode_v]
+                            end_u = self.mode_end[mode_u]
+                            model.Add(start_v >= end_u + s_uv).OnlyEnforceIf(b)
+                            
+                        elif u != 0 and v == 0:
+                            # Real -> Dummy
+                            mode_u = node_to_mode[u]
+                            model.AddImplication(b, self.mode_pres[mode_u])
+                            
+                        elif u == 0 and v != 0:
+                            # Dummy -> Real
+                            mode_v = node_to_mode[v]
+                            model.AddImplication(b, self.mode_pres[mode_v])
 
             # Finally add the circuit constraint for this machine
             model.AddCircuit(arcs)
