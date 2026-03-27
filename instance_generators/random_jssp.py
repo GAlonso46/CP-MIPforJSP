@@ -1,14 +1,14 @@
 """
-Generador aleatorio de instancias JSSP básicas.
-Cada job tiene m operaciones (una por máquina). Para cada job se elige una permutación aleatoria
-de las máquinas y para cada operación se asigna un tiempo de procesamiento entero uniformemente
-muestreado entre 1 y 99 (incluidos), usando el módulo random de Python.
+Basic JSSP random instance generator.
+Each job has m operations (one per machine). For each job, a random permutation of machines is chosen,
+and for each operation an integer processing time uniformly sampled between 1 and 99 (inclusive) is assigned,
+using Python's random module.
 
-Funciones principales:
-- generate_instance(j, m, seed=None): devuelve la instancia como un diccionario.
-- instance_to_string(instance): devuelve una representación JSON legible de la instancia.
+Main functions:
+- generate_instance(j, m, seed=None): returns the instance as a dictionary.
+- instance_to_string(instance): returns a readable JSON representation of the instance.
 
-Formato de la instancia devuelta:
+Returned instance format:
 {
   "num_jobs": j,
   "num_machines": m,
@@ -24,7 +24,7 @@ Formato de la instancia devuelta:
   ]
 }
 
-Este archivo también puede ejecutarse como script para generar una instancia desde la línea de comandos.
+This file can also be executed as a script to generate an instance from the command line.
 """
 
 from typing import Dict, Optional
@@ -33,18 +33,18 @@ import json
 
 
 def generate_instance(j: int, m: int, seed: Optional[int] = None) -> Dict:
-    """Genera y devuelve una instancia JSSP aleatoria.
+    """Generates and returns a random JSSP instance.
 
     Args:
-        j: número de jobs (debe ser > 0)
-        m: número de máquinas (debe ser > 0)
-        seed: semilla opcional para reproducibilidad
+        j: number of jobs (must be > 0)
+        m: number of machines (must be > 0)
+        seed: optional seed for reproducibility
 
     Returns:
-        Diccionario con la instancia en el formato descrito arriba.
+        Dictionary with the instance in the format described above.
     """
     if j <= 0 or m <= 0:
-        raise ValueError("j y m deben ser enteros positivos")
+        raise ValueError("j and m must be positive integers")
 
     if seed is not None:
         random.seed(seed)
@@ -53,11 +53,11 @@ def generate_instance(j: int, m: int, seed: Optional[int] = None) -> Dict:
     machines = list(range(m))
 
     for job_id in range(j):
-        perm = machines[:]  # copia
+        perm = machines[:]  # copy
         random.shuffle(perm)
         ops = []
         for op_idx in range(m):
-            proc_time = random.randint(1, 99)  # uniforme 1..99
+            proc_time = random.randint(1, 99)  # uniform 1..99
             ops.append({
                 "operation_id": op_idx,
                 "machine": perm[op_idx],
@@ -69,17 +69,17 @@ def generate_instance(j: int, m: int, seed: Optional[int] = None) -> Dict:
 
 
 def instance_to_string(instance: Dict) -> str:
-    """Devuelve una representación JSON legible de la instancia."""
+    """Returns a readable JSON representation of the instance."""
     return json.dumps(instance, indent=2, ensure_ascii=False)
 
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Generador aleatorio JSSP básico")
-    parser.add_argument("j", type=int, help="Número de jobs")
-    parser.add_argument("m", type=int, help="Número de máquinas")
-    parser.add_argument("--seed", type=int, default=None, help="Semilla aleatoria (opcional)")
+    parser = argparse.ArgumentParser(description="Basic JSSP random generator")
+    parser.add_argument("j", type=int, help="Number of jobs")
+    parser.add_argument("m", type=int, help="Number of machines")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed (optional)")
     args = parser.parse_args()
 
     inst = generate_instance(args.j, args.m, seed=args.seed)
