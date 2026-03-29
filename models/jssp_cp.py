@@ -10,8 +10,6 @@ Data dictionary expected keys:
   - tasks, job_tasks, machines, workers, P, L, M_t, W_t, p, s, V, release_dates, deadlines
 
 Notes about implementation choices:
-- Uses Big-M conditional inequalities for synchronizing task interval and mode
-  intervals.
 - Uses AddCircuit for machine sequencing with boolean arc variables.
 - Uses AddNoOverlap for workers.
 
@@ -53,7 +51,7 @@ class JSSPCpModel:
 
     def _validate_and_parse_data(self):
         d = self.data
-        required = ["machines", "workers", "P", "M_t", "W_t", "p", "V", "tasks"]
+        required = ["machines", "workers", "P", "M_t", "W_t", "p", "tasks"]
         for k in required:
             if k not in d:
                 raise KeyError(f"Data dictionary must contain key '{k}'")
@@ -91,11 +89,6 @@ class JSSPCpModel:
             for key, value in d["s"].items():
                 self.s[tuple(key)] = int(value)
 
-        # Big-M
-        self.V: int = int(d["V"]) if "V" in d else None
-        if self.V is None:
-            raise KeyError("Big-M parameter 'V' must be provided in data as key 'V'")
-
         # compute a safe horizon (upper bound on time) for variable domains
         max_deadline = max(self.d.values()) if self.d else 0
         max_release = max(self.r.values()) if self.r else 0
@@ -110,11 +103,10 @@ class JSSPCpModel:
         # max setup
         max_s = max(self.s.values()) if self.s else 0
         # horizon estimate
-        self.horizon = max(max_deadline, max_release + sum_max_p + max_s * len(self.tasks) ) + self.V
+        self.horizon = max(max_deadline, max_release + sum_max_p + max_s * len(self.tasks) )
 
     def build_model(self):
         model = self.model
-        M = self.V  # Big-M
 
         # Create job interval vars I_j
         for j in self.jobs:
