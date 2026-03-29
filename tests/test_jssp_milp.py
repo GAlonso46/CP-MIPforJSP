@@ -47,7 +47,6 @@ def instance_1():
         "M_t": M_t,
         "W_t": W_t,
         "p": p,
-        "V": 1000,
     }
     return data
 
@@ -66,7 +65,7 @@ def instance_2():
     # precedence within jobs
     P = [("a0", "a1"), ("b0", "b1"), ("c0", "c1")]
     # inter-job lag: a1 must start at least 1 after b0 completion
-    L = {("b0", "a1"): 1.0}
+    L = {("b0", "a1"): 1}
 
     M_t = {t: machines[:] for t in tasks}
     W_t = {t: workers[:] for t in tasks}
@@ -75,7 +74,7 @@ def instance_2():
     for t in tasks:
         for m in machines:
             for w in workers:
-                p[(t, m, w)] = 1 + (hash(t + m + w) % 3)  # small pseudo-random 1..3
+                p[(t, m, w)] = 1
 
     # simple SDST: on m0, switching from any task i to k adds 1 time unit
     s = {}
@@ -83,7 +82,7 @@ def instance_2():
         for k in tasks:
             if i == k:
                 continue
-            s[(i, k, "m0")] = 1.0
+            s[(i, k, "m0")] = 1
 
     data = {
         "tasks": tasks,
@@ -96,7 +95,6 @@ def instance_2():
         "W_t": W_t,
         "p": p,
         "s": s,
-        "V": 1000,
     }
     return data
 
@@ -123,10 +121,10 @@ def instance_3():
     for idx, t in enumerate(tasks):
         for m in machines:
             for w in workers:
-                p[(t, m, w)] = 1 + ((idx + len(m)) % 3)
+                p[(t, m, w)] = 1
 
-    release_dates = {"j2": 2.0}  # job j2 cannot start before 2
-    deadlines = {"j3": 5.0}     # job j3 must finish early
+    release_dates = {"j2": 2}  # job j2 cannot start before 2
+    deadlines = {"j3": 5}     # job j3 must finish early
 
     data = {
         "tasks": tasks,
@@ -137,7 +135,6 @@ def instance_3():
         "M_t": M_t,
         "W_t": W_t,
         "p": p,
-        "V": 1000,
         "release_dates": release_dates,
         "deadlines": deadlines,
     }
