@@ -3,6 +3,7 @@ Instance variant generators for extended JSSP.
 
 Provides the following functions:
 - generate_fjssp_variant
+- generate_timelags_variant
 
 All functions return a new data dictionary (deep copy) so the original input
 is not modified.
@@ -66,4 +67,32 @@ def generate_fjssp_variant(data: Dict[str, Any], min_m: int = 1, max_m: int = 3,
     # keep W_t unchanged
     return out
 
+def generate_timelags_variant(data: Dict[str, Any], density: float = 0.3, min_lag: int = 1, max_lag: int = 10, seed: int = None) -> Dict[str, Any]:
+    """Add time lags between consecutive tasks of the same job.
+
+    For each consecutive pair (t_i, t_{i+1}) in a job, with probability
+    `density` add a lag uniformly sampled between min_lag and max_lag.
+    If no lag is created (zero total), force one random consecutive pair to
+    have a lag so the variant is active.
+    """
+    rnd = random.Random(seed)
+    out = copy.deepcopy(data)
+
+    L = {}
+    tasks_with_pairs: List[Tuple[Any, Any]] = []
+    for j, tlist in out.get("job_tasks", {}).items():
+        for idx in range(len(tlist) - 1):
+            i = tlist[idx]
+            k = tlist[idx + 1]
+            tasks_with_pairs.append((i, k))
+            if rnd.random() <= density:
+                L[(i, k)] = rnd.randint(min_lag, max_lag)
+
+    # ensure at least one lag exists
+    if len(L) == 0 and tasks_with_pairs:
+        pair = rnd.choice(tasks_with_pairs)
+        L[pair] = rnd.randint(min_lag, max_lag)
+
+    out["L"] = {k: v for k, v in L.items()}
+    return out
 
