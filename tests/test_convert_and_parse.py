@@ -4,7 +4,7 @@ instances/basic_jssp/ta_test, then parses it back and performs basic consistency
 
 Run: python3 tests/test_convert_and_parse.py
 """
-from instance_generators.random_jssp import generate_instance
+from instance_generators.random_jssp import generate_instance, instance_to_string
 from utils.convert_to_ta import write_instance_to_ta_file, convert_instance_to_ta_format
 from utils.parse_ta import parse_ta_file
 import os
@@ -12,6 +12,7 @@ import os
 
 def main():
     inst = generate_instance(3, 4, seed=123)
+    print(instance_to_string(inst))
 
     out_dir = "instances/basic_jssp"
     filename = "ta_test"
