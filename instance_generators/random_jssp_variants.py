@@ -4,6 +4,7 @@ Instance variant generators for extended JSSP.
 Provides the following functions:
 - generate_fjssp_variant
 - generate_timelags_variant
+- generate_release_dates_variant
 
 All functions return a new data dictionary (deep copy) so the original input
 is not modified.
@@ -67,6 +68,7 @@ def generate_fjssp_variant(data: Dict[str, Any], min_m: int = 1, max_m: int = 3,
     # keep W_t unchanged
     return out
 
+
 def generate_timelags_variant(data: Dict[str, Any], density: float = 0.3, min_lag: int = 1, max_lag: int = 10, seed: int = None) -> Dict[str, Any]:
     """Add time lags between consecutive tasks of the same job.
 
@@ -96,3 +98,34 @@ def generate_timelags_variant(data: Dict[str, Any], density: float = 0.3, min_la
     out["L"] = {k: v for k, v in L.items()}
     return out
 
+
+def generate_release_dates_variant(base_data: Dict[str, Any], job_prob: float = 0.4, max_r_ratio: float = 0.5, seed: int = None) -> Dict[str, Any]:
+    """Generate release dates for a subset of jobs.
+
+    - Compute a simple makespan upper bound as the sum of per-task maximum
+      processing times (across modes). For each job, with probability
+      job_prob, assign a release date uniformly in [0, makespan * max_r_ratio].
+    """
+    rnd = random.Random(seed)
+    out = copy.deepcopy(base_data)
+
+    # estimate makespan upper bound (sum of max processing times per task)
+    sum_max_p = 0
+    for t in out.get("tasks", []):
+        max_p_t = 0
+        # if p uses tuple keys, iterate
+        for (tt, mm, ww), val in out.get("p", {}).items():
+            if tt == t:
+                max_p_t = max(max_p_t, float(val))
+        # fallback to 1 if nothing found
+        sum_max_p += max(1.0, max_p_t)
+
+    bound = float(sum_max_p)
+    release_dates: Dict[Any, int] = {}
+    for j in out.get("job_tasks", {}).keys():
+        if rnd.random() <= job_prob:
+            r = rnd.uniform(0, bound * float(max_r_ratio))
+            release_dates[j] = int(round(r))
+
+    out["release_dates"] = release_dates
+    return out
