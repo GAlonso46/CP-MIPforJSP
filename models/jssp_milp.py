@@ -30,7 +30,7 @@ class JSSPMilpModel:
 
     def _validate_and_parse_data(self):
         d = self.data
-        # Require W_m (worker -> list of machines) instead of previous W_t
+
         required = ["machines", "workers", "P", "M_t", "W_m", "p", "tasks"]
         for k in required:
             if k not in d:
@@ -40,7 +40,7 @@ class JSSPMilpModel:
         self.workers: List[Any] = list(d["workers"])
         self.tasks: List[Any] = list(d["tasks"])
 
-        # job_tasks handling (keep existing flexible behavior)
+        # job_tasks handling
         if "job_tasks" in d:
             self.job_tasks: Dict[Any, List[Any]] = {j: list(ts) for j, ts in d["job_tasks"].items()}
             self.jobs = list(self.job_tasks.keys())
@@ -65,7 +65,7 @@ class JSSPMilpModel:
         self.r: Dict[Any, int] = {j: int(round(float(v))) for j, v in d.get("release_dates", {}).items()} if d.get("release_dates") else {}
         self.d: Dict[Any, int] = {j: int(round(float(v))) for j, v in d.get("deadlines", {}).items()} if d.get("deadlines") else {}
 
-        # eligibility: machines per task (unchanged)
+        # eligibility: machines per task
         self.M_t: Dict[Any, List[Any]] = {t: list(ms) for t, ms in d["M_t"].items()}
         # worker->machines capability matrix
         self.W_m: Dict[Any, List[Any]] = {w: list(ms) for w, ms in d["W_m"].items()}
@@ -129,7 +129,6 @@ class JSSPMilpModel:
                 x_keys.append((t, mm, ww))
         self.x = m.addVars(x_keys, vtype=GRB.BINARY, name="x")
 
-        # y and z variables remain as before (pairwise sequencing binaries)
         y_keys = []
         for i in self.tasks:
             for k in self.tasks:

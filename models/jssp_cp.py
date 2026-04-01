@@ -7,7 +7,7 @@ Class: JSSPCpModel
 - optimize(time_limit_seconds=None): solves and returns results
 
 Data dictionary expected keys:
-  - tasks, job_tasks, machines, workers, P, L, M_t, W_t, p, s, V, release_dates, deadlines
+  - tasks, job_tasks, machines, workers, P, L, M_t, W_t, p, s, release_dates, deadlines
 
 Notes about implementation choices:
 - Uses AddCircuit for machine sequencing with boolean arc variables.
@@ -20,11 +20,6 @@ from ortools.sat.python import cp_model
 
 class JSSPCpModel:
     """CP-SAT model for the extended JSSP as specified.
-
-    The data dictionary should follow the same conventions used by the MILP
-    implementation. Durations, lags and deadlines must be integer or castable
-    to int. The Big-M 'V' should be provided and used for the conditional
-    inequalities linking task intervals and mode intervals.
     """
 
     def __init__(self, data: Dict[str, Any], cp_params: Dict[str, Any] = None):
@@ -163,7 +158,7 @@ class JSSPCpModel:
                 raise ValueError(f"Task {t} has no eligible (machine,worker) modes")
             model.AddExactlyOne(mode_pres_list)
 
-            # Synchronize task interval with selected mode; iterating mode_pres keys is enough
+            # Synchronize task interval with selected mode
             for (tt, mm, ww), pres in list(self.mode_pres.items()):
                 if tt != t:
                     continue
@@ -195,7 +190,7 @@ class JSSPCpModel:
             for (t, mm, ww2), iv in self.mode_iv.items():
                 if ww2 != ww:
                     continue
-                # mode_iv keys are only feasible OM_t modes so filtering by worker is sufficient
+                # mode_iv keys are only feasible OM_t modes 
                 ivs.append(iv)
             model.AddNoOverlap(ivs)
 
