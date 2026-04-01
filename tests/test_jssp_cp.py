@@ -19,6 +19,8 @@ def _print_solution(model: JSSPCpModel, data_name: str):
         print(f"  - {t}: start={info['start']} end={info['end']}")
 
 
+# New instances aligned with MILP tests: provide M_t and W_m and only feasible triples in p
+
 def instance_1():
     machines = ["m0", "m1"]
     workers = ["w0"]
@@ -30,13 +32,23 @@ def instance_1():
     tasks = sum(job_tasks.values(), [])
     P = [("t0_0", "t0_1"), ("t1_0", "t1_1")]
 
-    M_t = {t: machines[:] for t in tasks}
-    W_t = {t: workers[:] for t in tasks}
+    M_t = {
+        "t0_0": ["m0"],
+        "t0_1": ["m1"],
+        "t1_0": ["m0"],
+        "t1_1": ["m1"],
+    }
+
+    W_m = {
+        "w0": ["m0", "m1"],
+    }
 
     p = {}
     for t in tasks:
-        for m in machines:
-            p[(t, m, "w0")] = 1 if m == "m0" else 2
+        for m in M_t[t]:
+            for w in workers:
+                if m in W_m[w]:
+                    p[(t, m, w)] = 1 if m == "m0" else 2
 
     data = {
         "tasks": tasks,
@@ -45,7 +57,7 @@ def instance_1():
         "workers": workers,
         "P": P,
         "M_t": M_t,
-        "W_t": W_t,
+        "W_m": W_m,
         "p": p,
         "V": 1000,
     }
@@ -65,14 +77,26 @@ def instance_2():
     P = [("a0", "a1"), ("b0", "b1"), ("c0", "c1")]
     L = {("b0", "a1"): 1.0}
 
-    M_t = {t: machines[:] for t in tasks}
-    W_t = {t: workers[:] for t in tasks}
+    M_t = {}
+    for idx, t in enumerate(tasks):
+        if idx % 3 == 0:
+            M_t[t] = ["m0", "m1"]
+        elif idx % 3 == 1:
+            M_t[t] = ["m1", "m2"]
+        else:
+            M_t[t] = ["m0", "m2"]
+
+    W_m = {
+        "w0": ["m0", "m1"],
+        "w1": ["m1", "m2"],
+    }
 
     p = {}
     for t in tasks:
-        for m in machines:
+        for m in M_t[t]:
             for w in workers:
-                p[(t, m, w)] = 1 + (hash(t + m + w) % 3)
+                if m in W_m[w]:
+                    p[(t, m, w)] = 1
 
     s = {}
     for i in tasks:
@@ -89,7 +113,7 @@ def instance_2():
         "P": P,
         "L": L,
         "M_t": M_t,
-        "W_t": W_t,
+        "W_m": W_m,
         "p": p,
         "s": s,
         "V": 1000,
@@ -110,14 +134,24 @@ def instance_3():
     tasks = sum(job_tasks.values(), [])
     P = []
 
-    M_t = {t: machines[:] for t in tasks}
-    W_t = {t: workers[:] for t in tasks}
+    M_t = {
+        "t00": ["m0", "m2"],
+        "t10": ["m1"],
+        "t20": ["m2", "m3"],
+        "t30": ["m0", "m3"],
+    }
+
+    W_m = {
+        "w0": ["m0", "m2"],
+        "w1": ["m1", "m3"],
+    }
 
     p = {}
     for idx, t in enumerate(tasks):
-        for m in machines:
+        for m in M_t[t]:
             for w in workers:
-                p[(t, m, w)] = 1 + ((idx + len(m)) % 3)
+                if m in W_m[w]:
+                    p[(t, m, w)] = 1
 
     release_dates = {"j2": 2.0}
     deadlines = {"j3": 5.0}
@@ -129,7 +163,7 @@ def instance_3():
         "workers": workers,
         "P": P,
         "M_t": M_t,
-        "W_t": W_t,
+        "W_m": W_m,
         "p": p,
         "V": 1000,
         "release_dates": release_dates,
