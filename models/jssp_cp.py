@@ -51,7 +51,7 @@ class JSSPCpModel:
 
     def _validate_and_parse_data(self):
         d = self.data
-        required = ["machines", "workers", "P", "M_t", "W_t", "p", "tasks"]
+        required = ["machines", "workers", "P", "M_t", "W_m", "p", "tasks"]
         for k in required:
             if k not in d:
                 raise KeyError(f"Data dictionary must contain key '{k}'")
@@ -74,9 +74,10 @@ class JSSPCpModel:
         self.r: Dict[Any, int] = {j: int(v) for j, v in d.get("release_dates", {}).items()} if d.get("release_dates") else {}
         self.d: Dict[Any, int] = {j: int(v) for j, v in d.get("deadlines", {}).items()} if d.get("deadlines") else {}
 
-        # eligibility
+        # eligibility per task
         self.M_t: Dict[Any, List[Any]] = {t: list(ms) for t, ms in d["M_t"].items()}
-        self.W_t: Dict[Any, List[Any]] = {t: list(ws) for t, ws in d["W_t"].items()}
+        # worker->machines capability
+        self.W_m: Dict[Any, List[Any]] = {w: list(ms) for w, ms in d["W_m"].items()}
 
         # processing times
         self.p: Dict[Tuple[Any, Any, Any], int] = {}
@@ -89,16 +90,26 @@ class JSSPCpModel:
             for key, value in d["s"].items():
                 self.s[tuple(key)] = int(value)
 
+        # --- construct OM_t: feasible (machine,worker) modes per task ---
+        self.OM_t: Dict[Any, List[Tuple[Any, Any]]] = {}
+        for t in self.tasks:
+            om_list = []
+            for mm in self.M_t.get(t, []):
+                for ww in self.workers:
+                    if mm in self.W_m.get(ww, []) and (t, mm, ww) in self.p:
+                        om_list.append((mm, ww))
+            self.OM_t[t] = om_list
+            if not om_list:
+                raise ValueError(f"Task {t} has no feasible operation modes OM_t")
+
         # compute a safe horizon (upper bound on time) for variable domains
         max_deadline = max(self.d.values()) if self.d else 0
         max_release = max(self.r.values()) if self.r else 0
         sum_max_p = 0
         for t in self.tasks:
-            # max processing time across modes
             max_p_t = 0
-            for mm in self.M_t.get(t, []):
-                for ww in self.W_t.get(t, []):
-                    max_p_t = max(max_p_t, self.p.get((t, mm, ww), 0))
+            for (mm, ww) in self.OM_t.get(t, []):
+                max_p_t = max(max_p_t, self.p.get((t, mm, ww), 0))
             sum_max_p += max_p_t
         # max setup
         max_s = max(self.s.values()) if self.s else 0
@@ -122,8 +133,6 @@ class JSSPCpModel:
 
         # Create mode optional intervals O_{t,m,w} and task intervals I_t
         for t in self.tasks:
-            # mandatory task interval with flexible start and end; size variable will be linked
-            # We create start and end vars in [0, horizon]
             s_t = model.NewIntVar(0, self.horizon, f"start_task_{t}")
             e_t = model.NewIntVar(0, self.horizon, f"end_task_{t}")
             len_t = model.NewIntVar(0, self.horizon, f"len_task_{t}")
@@ -132,52 +141,39 @@ class JSSPCpModel:
             self.task_end[t] = e_t
             self.task_iv[t] = iv_t
 
-            # create modes
             mode_pres_list = []
-            for mm in self.M_t.get(t, []):
-                for ww in self.W_t.get(t, []):
-                    dur = self.p.get((t, mm, ww), None)
-                    if dur is None:
-                        continue
-                    pres = model.NewBoolVar(f"pres_{t}_{mm}_{ww}")
-                    mo_start = model.NewIntVar(0, self.horizon, f"start_mode_{t}_{mm}_{ww}")
-                    mo_end = model.NewIntVar(0, self.horizon, f"end_mode_{t}_{mm}_{ww}")
-                    # duration is fixed integer
-                    dur_var = dur
-                    iv_mode = model.NewOptionalIntervalVar(mo_start, dur_var, mo_end, pres, f"mode_iv_{t}_{mm}_{ww}")
+            # iterate only over feasible OM_t modes
+            for (mm, ww) in self.OM_t.get(t, []):
+                dur = self.p.get((t, mm, ww), None)
+                if dur is None:
+                    continue
+                pres = model.NewBoolVar(f"pres_{t}_{mm}_{ww}")
+                mo_start = model.NewIntVar(0, self.horizon, f"start_mode_{t}_{mm}_{ww}")
+                mo_end = model.NewIntVar(0, self.horizon, f"end_mode_{t}_{mm}_{ww}")
+                dur_var = dur
+                iv_mode = model.NewOptionalIntervalVar(mo_start, dur_var, mo_end, pres, f"mode_iv_{t}_{mm}_{ww}")
 
-                    self.mode_pres[(t, mm, ww)] = pres
-                    self.mode_start[(t, mm, ww)] = mo_start
-                    self.mode_end[(t, mm, ww)] = mo_end
-                    self.mode_iv[(t, mm, ww)] = iv_mode
-                    mode_pres_list.append(pres)
+                self.mode_pres[(t, mm, ww)] = pres
+                self.mode_start[(t, mm, ww)] = mo_start
+                self.mode_end[(t, mm, ww)] = mo_end
+                self.mode_iv[(t, mm, ww)] = iv_mode
+                mode_pres_list.append(pres)
 
-            # 1. Mode Selection: exactly one mode present per task
             if not mode_pres_list:
                 raise ValueError(f"Task {t} has no eligible (machine,worker) modes")
             model.AddExactlyOne(mode_pres_list)
 
-            # 2. Task-Mode Synchronization
-            # Link the main task interval (s_t, e_t, len_t) with the selected mode.
-            # If a specific mode (machine, worker) is present, the task must 
-            # assume that mode's start, end, and duration.
-            for (tt, mm, ww), pres in self.mode_pres.items():
+            # Synchronize task interval with selected mode; iterating mode_pres keys is enough
+            for (tt, mm, ww), pres in list(self.mode_pres.items()):
                 if tt != t:
                     continue
-                
                 ms = self.mode_start[(tt, mm, ww)]
                 me = self.mode_end[(tt, mm, ww)]
                 dur_var = self.p.get((tt, mm, ww))
-
-                # If pres is true, then task_start == mode_start
                 model.Add(self.task_start[t] == ms).OnlyEnforceIf(pres)
-                
-                # If pres is true, then task_end == mode_end
                 model.Add(self.task_end[t] == me).OnlyEnforceIf(pres)
-                
-                # If pres is true, the task length must match the mode duration
                 model.Add(len_t == dur_var).OnlyEnforceIf(pres)
-                
+
         # 3. Precedence & Time Lags: Start(I_k) >= End(I_i) + L_{ik}
         for (i, k) in self.P:
             lag = self.L.get((i, k), 0)
@@ -187,11 +183,9 @@ class JSSPCpModel:
         for j, tlist in self.job_tasks.items():
             rj = self.r.get(j, 0)
             dj = self.d.get(j, self.horizon)
-            # job start/end already bounded; ensure start_job <= start_task and end_job >= end_task
             for t in tlist:
                 model.Add(self.job_start[j] <= self.task_start[t])
                 model.Add(self.job_end[j] >= self.task_end[t])
-            # enforce job window bounds (already in var domains)
             model.Add(self.job_start[j] >= rj)
             model.Add(self.job_end[j] <= dj)
 
@@ -201,15 +195,12 @@ class JSSPCpModel:
             for (t, mm, ww2), iv in self.mode_iv.items():
                 if ww2 != ww:
                     continue
+                # mode_iv keys are only feasible OM_t modes so filtering by worker is sufficient
                 ivs.append(iv)
-            # AddNoOverlap accepts interval vars (including optional)
             model.AddNoOverlap(ivs)
 
         # 6. Machine Sequencing & SDST using AddCircuit
-        # For each machine, create a node 0 (dummy) and nodes for each mode on that machine.
         for mm in self.machines:
-            # collect modes on this machine
-            mode_nodes = []  # list of (node_idx, (t,mm,w))
             node_id = 1
             mode_to_node = {}
             node_to_mode = {0: None}
@@ -219,8 +210,7 @@ class JSSPCpModel:
                 mode_to_node[(t, m2, w)] = node_id
                 node_to_mode[node_id] = (t, m2, w)
                 node_id += 1
-            num_nodes = node_id  # node ids 0..node_id-1
-            # create arc boolean variables for all pairs (including self-loops)
+            num_nodes = node_id
             arcs = []
             arc_var = {}
             for u in range(num_nodes):
@@ -229,46 +219,29 @@ class JSSPCpModel:
                     arcs.append((u, v, b))
                     arc_var[(u, v)] = b
                     if u == v:
-                        # --- Self-Loops ---
                         if u != 0:
-                            # If it is a real node, the self-loop is activated IF AND ONLY IF the NO mode is present
                             mode_u = node_to_mode[u]
                             pres_u = self.mode_pres[mode_u]
                             model.Add(pres_u == 0).OnlyEnforceIf(b)
-                            model.Add(b == 1).OnlyEnforceIf(pres_u.Not()) # Accelerates propagation
-                        else:
-                            # Self-loop of the dummy node (0 to 0): no extra logic required
-                            pass
+                            model.Add(b == 1).OnlyEnforceIf(pres_u.Not())
                     else:
-                        # --- CROSS ARCS (u != v) ---
                         if u != 0 and v != 0:
-                            # Real -> Real
                             mode_u = node_to_mode[u]
                             mode_v = node_to_mode[v]
                             pres_u = self.mode_pres[mode_u]
                             pres_v = self.mode_pres[mode_v]
-                            
-                            # If the arc is used, BOTH modes MUST be present
                             model.AddImplication(b, pres_u)
                             model.AddImplication(b, pres_v)
-                            
-                            # Time separation with Setup (SDST)
                             s_uv = self.s.get((mode_u[0], mode_v[0], mm), 0)
                             start_v = self.mode_start[mode_v]
                             end_u = self.mode_end[mode_u]
                             model.Add(start_v >= end_u + s_uv).OnlyEnforceIf(b)
-                            
                         elif u != 0 and v == 0:
-                            # Real -> Dummy
                             mode_u = node_to_mode[u]
                             model.AddImplication(b, self.mode_pres[mode_u])
-                            
                         elif u == 0 and v != 0:
-                            # Dummy -> Real
                             mode_v = node_to_mode[v]
                             model.AddImplication(b, self.mode_pres[mode_v])
-
-            # Finally add the circuit constraint for this machine
             model.AddCircuit(arcs)
 
         # 7. Objective: C_max >= End(I_j) for all j; minimize C_max
