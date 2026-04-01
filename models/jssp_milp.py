@@ -86,12 +86,21 @@ class JSSPMilpModel:
         for t in self.tasks:
             om_list = []
             for mm in self.M_t.get(t, []):
-                # workers that can operate mm
-                for ww in self.workers:
-                    if mm in self.W_m.get(ww, []):
-                        # ensure a processing time exists for this triple
-                        if (t, mm, ww) in self.p:
-                            om_list.append((mm, ww))
+                # if workers are provided, match workers that can operate mm
+                if self.workers:
+                    for ww in self.workers:
+                        if mm in self.W_m.get(ww, []):
+                            if (t, mm, ww) in self.p:
+                                om_list.append((mm, ww))
+                else:
+                    # no workers: build mode with None as worker if any p entry matches (t,mm,*)
+                    found = False
+                    for key in self.p.keys():
+                        if key[0] == t and key[1] == mm:
+                            found = True
+                            break
+                    if found:
+                        om_list.append((mm, None))
             self.OM_t[t] = om_list
             if not om_list:
                 raise ValueError(f"Task {t} has no feasible (machine,worker) modes in OM_t")
@@ -122,13 +131,17 @@ class JSSPMilpModel:
         self.C = m.addVars(self.tasks, vtype=GRB.INTEGER, lb=0.0, name="C")
         self.C_max = m.addVar(vtype=GRB.INTEGER, lb=0.0, name="C_max")
 
+        has_workers = bool(self.workers)
+
         # Build x only over feasible operation modes OM_t
         x_keys = []
         for t in self.tasks:
             for (mm, ww) in self.OM_t.get(t, []):
+                # use None for worker dimension when no workers exist
                 x_keys.append((t, mm, ww))
         self.x = m.addVars(x_keys, vtype=GRB.BINARY, name="x")
 
+        # y variables (machine sequencing) always needed
         y_keys = []
         for i in self.tasks:
             for k in self.tasks:
@@ -137,13 +150,17 @@ class JSSPMilpModel:
                         y_keys.append((i, k, mm))
         self.y = m.addVars(y_keys, vtype=GRB.BINARY, name="y")
 
-        z_keys = []
-        for i in self.tasks:
-            for k in self.tasks:
-                if i != k:
-                    for ww in self.workers:
-                        z_keys.append((i, k, ww))
-        self.z = m.addVars(z_keys, vtype=GRB.BINARY, name="z")
+        # z variables (worker sequencing) only if workers exist
+        if has_workers:
+            z_keys = []
+            for i in self.tasks:
+                for k in self.tasks:
+                    if i != k:
+                        for ww in self.workers:
+                            z_keys.append((i, k, ww))
+            self.z = m.addVars(z_keys, vtype=GRB.BINARY, name="z")
+        else:
+            self.z = None
 
         m.update()
 
@@ -181,18 +198,28 @@ class JSSPMilpModel:
                     continue
                 for mm in self.machines:
                     # workers for task i that use machine mm
-                    wi = [ww for (m, ww) in self.OM_t.get(i, []) if m == mm and (i, m, ww) in self.x]
-                    wk = [ww for (m, ww) in self.OM_t.get(k, []) if m == mm and (k, m, ww) in self.x]
+                    if has_workers:
+                        wi = [ww for (m, ww) in self.OM_t.get(i, []) if m == mm and (i, m, ww) in self.x]
+                        wk = [ww for (m, ww) in self.OM_t.get(k, []) if m == mm and (k, m, ww) in self.x]
 
-                    sum_xi = gp.quicksum(self.x[(i, mm, ww)] for ww in wi) if wi else 0
-                    sum_xk = gp.quicksum(self.x[(k, mm, ww)] for ww in wk) if wk else 0
+                        sum_xi = gp.quicksum(self.x[(i, mm, ww)] for ww in wi) if wi else 0
+                        sum_xk = gp.quicksum(self.x[(k, mm, ww)] for ww in wk) if wk else 0
+                    else:
+                        # no workers: x keys use ww=None
+                        sum_xi = self.x[(i, mm, None)] if (i, mm, None) in self.x else 0
+                        sum_xk = self.x[(k, mm, None)] if (k, mm, None) in self.x else 0
 
-                    if wi:
+                    if has_workers and wi:
+                        m.addConstr(self.y[(i, k, mm)] <= sum_xi, name=f"y_le_xi_{i}_{k}_{mm}")
+                    elif not has_workers:
+                        # when no workers exist, y is tied to x presence on machine mm
                         m.addConstr(self.y[(i, k, mm)] <= sum_xi, name=f"y_le_xi_{i}_{k}_{mm}")
                     else:
                         m.addConstr(self.y[(i, k, mm)] <= 0, name=f"y_zero_i_{i}_{k}_{mm}")
 
-                    if wk:
+                    if has_workers and wk:
+                        m.addConstr(self.y[(i, k, mm)] <= sum_xk, name=f"y_le_xk_{i}_{k}_{mm}")
+                    elif not has_workers:
                         m.addConstr(self.y[(i, k, mm)] <= sum_xk, name=f"y_le_xk_{i}_{k}_{mm}")
                     else:
                         m.addConstr(self.y[(i, k, mm)] <= 0, name=f"y_zero_k_{i}_{k}_{mm}")
@@ -219,45 +246,47 @@ class JSSPMilpModel:
                     m.addConstr(self.S[i] >= self.C[k] + s_kim * y_kim - self.V * (1 - y_kim), name=f"sdst2_{i}_{k}_{mm}")
 
         # 7. Worker Sequence Consistency
-        for i in self.tasks:
-            for k in self.tasks:
-                if i == k:
-                    continue
-                for ww in self.workers:
-                    # machines for task i that can be operated by ww
-                    mi = [mm for (mm, w) in self.OM_t.get(i, []) if w == ww and (i, mm, w) in self.x]
-                    mk = [mm for (mm, w) in self.OM_t.get(k, []) if w == ww and (k, mm, w) in self.x]
+        if has_workers:
+            for i in self.tasks:
+                for k in self.tasks:
+                    if i == k:
+                        continue
+                    for ww in self.workers:
+                        # machines for task i that can be operated by ww
+                        mi = [mm for (mm, w) in self.OM_t.get(i, []) if w == ww and (i, mm, w) in self.x]
+                        mk = [mm for (mm, w) in self.OM_t.get(k, []) if w == ww and (k, mm, w) in self.x]
 
-                    sum_xi_w = gp.quicksum(self.x[(i, mm, ww)] for mm in mi) if mi else 0
-                    sum_xk_w = gp.quicksum(self.x[(k, mm, ww)] for mm in mk) if mk else 0
+                        sum_xi_w = gp.quicksum(self.x[(i, mm, ww)] for mm in mi) if mi else 0
+                        sum_xk_w = gp.quicksum(self.x[(k, mm, ww)] for mm in mk) if mk else 0
 
-                    if mi:
-                        m.addConstr(self.z[(i, k, ww)] <= sum_xi_w, name=f"z_le_xi_{i}_{k}_{ww}")
-                    else:
-                        m.addConstr(self.z[(i, k, ww)] <= 0, name=f"z_zero_i_{i}_{k}_{ww}")
+                        if mi:
+                            m.addConstr(self.z[(i, k, ww)] <= sum_xi_w, name=f"z_le_xi_{i}_{k}_{ww}")
+                        else:
+                            m.addConstr(self.z[(i, k, ww)] <= 0, name=f"z_zero_i_{i}_{k}_{ww}")
 
-                    if mk:
-                        m.addConstr(self.z[(i, k, ww)] <= sum_xk_w, name=f"z_le_xk_{i}_{k}_{ww}")
-                    else:
-                        m.addConstr(self.z[(i, k, ww)] <= 0, name=f"z_zero_k_{i}_{k}_{ww}")
+                        if mk:
+                            m.addConstr(self.z[(i, k, ww)] <= sum_xk_w, name=f"z_le_xk_{i}_{k}_{ww}")
+                        else:
+                            m.addConstr(self.z[(i, k, ww)] <= 0, name=f"z_zero_k_{i}_{k}_{ww}")
 
-                    m.addConstr(self.z[(i, k, ww)] + self.z[(k, i, ww)] <= 1, name=f"z_antisym_{i}_{k}_{ww}")
+                        m.addConstr(self.z[(i, k, ww)] + self.z[(k, i, ww)] <= 1, name=f"z_antisym_{i}_{k}_{ww}")
 
-                    m.addConstr(
-                        self.z[(i, k, ww)] + self.z[(k, i, ww)] >= sum_xi_w + sum_xk_w - 1,
-                        name=f"z_force_{i}_{k}_{ww}"
-                    )
+                        m.addConstr(
+                            self.z[(i, k, ww)] + self.z[(k, i, ww)] >= sum_xi_w + sum_xk_w - 1,
+                            name=f"z_force_{i}_{k}_{ww}"
+                        )
 
         # 8. Worker Disjunction
-        for i in self.tasks:
-            for k in self.tasks:
-                if i == k:
-                    continue
-                for ww in self.workers:
-                    zijw = self.z[(i, k, ww)]
-                    m.addConstr(self.S[k] >= self.C[i] - self.V * (1 - zijw), name=f"worker_disj1_{i}_{k}_{ww}")
-                    zkjw = self.z[(k, i, ww)]
-                    m.addConstr(self.S[i] >= self.C[k] - self.V * (1 - zkjw), name=f"worker_disj2_{i}_{k}_{ww}")
+        if has_workers:
+            for i in self.tasks:
+                for k in self.tasks:
+                    if i == k:
+                        continue
+                    for ww in self.workers:
+                        zijw = self.z[(i, k, ww)]
+                        m.addConstr(self.S[k] >= self.C[i] - self.V * (1 - zijw), name=f"worker_disj1_{i}_{k}_{ww}")
+                        zkjw = self.z[(k, i, ww)]
+                        m.addConstr(self.S[i] >= self.C[k] - self.V * (1 - zkjw), name=f"worker_disj2_{i}_{k}_{ww}")
 
         # 9. Makespan
         for t in self.tasks:
