@@ -86,13 +86,28 @@ class JSSPCpModel:
                 self.s[tuple(key)] = int(value)
 
         # --- construct OM_t: feasible (machine,worker) modes per task ---
+        # If no workers are provided, create modes with worker=None and map a representative
+        # processing time to (t, m, None).
         self.OM_t: Dict[Any, List[Tuple[Any, Any]]] = {}
         for t in self.tasks:
             om_list = []
             for mm in self.M_t.get(t, []):
-                for ww in self.workers:
-                    if mm in self.W_m.get(ww, []) and (t, mm, ww) in self.p:
-                        om_list.append((mm, ww))
+                if self.workers:
+                    for ww in self.workers:
+                        if mm in self.W_m.get(ww, []) and (t, mm, ww) in self.p:
+                            om_list.append((mm, ww))
+                else:
+                    # no workers: accept machine mm if any p entry exists for (t,mm,*)
+                    chosen_val = None
+                    for (tt, m2, w2), val in list(self.p.items()):
+                        if tt == t and m2 == mm:
+                            chosen_val = val
+                            break
+                    if chosen_val is not None:
+                        # record a mode with worker dimension None and add a p entry for it
+                        om_list.append((mm, None))
+                        # create p entry for (t,mm,None) so downstream code can find duration
+                        self.p[(t, mm, None)] = int(chosen_val)
             self.OM_t[t] = om_list
             if not om_list:
                 raise ValueError(f"Task {t} has no feasible operation modes OM_t")
@@ -126,6 +141,8 @@ class JSSPCpModel:
             self.job_end[j] = end_j
             self.job_iv[j] = iv_j
 
+        has_workers = bool(self.workers)
+
         # Create mode optional intervals O_{t,m,w} and task intervals I_t
         for t in self.tasks:
             s_t = model.NewIntVar(0, self.horizon, f"start_task_{t}")
@@ -139,6 +156,7 @@ class JSSPCpModel:
             mode_pres_list = []
             # iterate only over feasible OM_t modes
             for (mm, ww) in self.OM_t.get(t, []):
+                # dur may reference ww==None; p was augmented in _validate_and_parse_data
                 dur = self.p.get((t, mm, ww), None)
                 if dur is None:
                     continue
@@ -185,14 +203,15 @@ class JSSPCpModel:
             model.Add(self.job_end[j] <= dj)
 
         # 5. Worker Capacity: NoOverlap over optional intervals assigned to worker w
-        for ww in self.workers:
-            ivs = []
-            for (t, mm, ww2), iv in self.mode_iv.items():
-                if ww2 != ww:
-                    continue
-                # mode_iv keys are only feasible OM_t modes 
-                ivs.append(iv)
-            model.AddNoOverlap(ivs)
+        if has_workers:
+            for ww in self.workers:
+                ivs = []
+                for (t, mm, ww2), iv in self.mode_iv.items():
+                    if ww2 != ww:
+                        continue
+                    # mode_iv keys are only feasible OM_t modes 
+                    ivs.append(iv)
+                model.AddNoOverlap(ivs)
 
         # 6. Machine Sequencing & SDST using AddCircuit
         for mm in self.machines:
