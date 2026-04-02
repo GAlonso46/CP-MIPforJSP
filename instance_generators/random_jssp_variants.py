@@ -183,3 +183,82 @@ def generate_sdst_uniform_variant(
     return out
 
 
+def generate_sdst_mixed_variant(
+    data: Dict[str, Any],
+    alpha: float = 0.5,
+    lambda_weight: float = 0.7,
+    K: int = 3,
+    beta_intra: float = 0.2,
+    beta_inter_min: float = 0.5,
+    beta_inter_max: float = 1.0,
+    seed: int = None
+) -> Dict[str, Any]:
+    """Generate mixed SDST combining a uniform component and a cluster-based component.
+
+    Returns a deep copy of the input data with key "s" added, mapping
+    (task_i, task_j, machine) -> int setup time.
+
+    Parameters:
+    - alpha: fraction for uniform component bound.
+    - lambda_weight: weight of uniform component in final value.
+    - K: number of clusters.
+    - beta_intra: fraction for intra-cluster component bound.
+    - beta_inter_min/beta_inter_max: fractions for inter-cluster range.
+    - seed: seed for random generator.
+    """
+    rnd = random.Random(seed)
+    out = copy.deepcopy(data)
+
+    # Compute average processing time
+    total = 0.0
+    count = 0
+    for _, val in out.get("p", {}).items():
+        try:
+            total += float(val)
+            count += 1
+        except Exception:
+            continue
+    avg_p = float(total / count) if count > 0 else 1.0
+
+    # Integer bounds
+    max_u = max(0, int(alpha * avg_p))
+    max_intra = max(0, int(beta_intra * avg_p))
+    inter_low = max(0, int(beta_inter_min * avg_p))
+    inter_high = max(inter_low, int(beta_inter_max * avg_p))
+
+    tasks = list(out.get("tasks", []))
+    machines = list(out.get("machines", []))
+
+    K_eff = max(1, int(K))
+
+    # Assign clusters
+    clusters: Dict[Any, int] = {}
+    for t in tasks:
+        clusters[t] = rnd.randrange(K_eff)
+
+    s: Dict[Tuple[Any, Any, Any], int] = {}
+
+    for m in machines:
+        for i in tasks:
+            for j in tasks:
+                if i == j:
+                    s[(i, j, m)] = 0
+                    continue
+
+                u_ij = rnd.randint(0, max_u) if max_u > 0 else 0
+
+                if clusters.get(i) == clusters.get(j):
+                    c_ij = rnd.randint(0, max_intra) if max_intra > 0 else 0
+                else:
+                    low = inter_low
+                    high = inter_high
+                    if high < low:
+                        high = low
+                    c_ij = rnd.randint(low, high) if high > 0 else 0
+
+                # Weighted integer combination
+                s_val = int(lambda_weight * u_ij + (1.0 - lambda_weight) * c_ij)
+                s[(i, j, m)] = s_val
+
+    out["s"] = s
+    return out
