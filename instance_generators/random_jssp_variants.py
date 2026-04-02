@@ -129,3 +129,57 @@ def generate_release_dates_variant(base_data: Dict[str, Any], job_prob: float = 
 
     out["release_dates"] = release_dates
     return out
+
+
+def generate_sdst_uniform_variant(
+    data: Dict[str, Any],
+    alpha: float = 0.5,
+    seed: int = None
+) -> Dict[str, Any]:
+    """Generate uniform sequence-dependent setup times (SDST).
+
+    Returns a deep copy of the input data with key "s" added, mapping
+    (task_i, task_j, machine) -> int setup time.
+
+    Parameters:
+    - data: input instance dictionary (not modified).
+    - alpha: fraction of average processing time used as upper bound.
+    - seed: seed for random generator.
+    """
+    rnd = random.Random(seed)
+    out = copy.deepcopy(data)
+
+    # Compute average processing time over all p entries
+    total = 0.0
+    count = 0
+    for _, val in out.get("p", {}).items():
+        try:
+            total += float(val)
+            count += 1
+        except Exception:
+            continue
+    avg_p = float(total / count) if count > 0 else 1.0
+
+    # Integer upper bound for setup sampling
+    max_setup = max(0, int(alpha * avg_p))
+
+    tasks = list(out.get("tasks", []))
+    machines = list(out.get("machines", []))
+
+    s: Dict[Tuple[Any, Any, Any], int] = {}
+
+    for m in machines:
+        for i in tasks:
+            for j in tasks:
+                if i == j:
+                    s[(i, j, m)] = 0
+                else:
+                    if max_setup <= 0:
+                        s[(i, j, m)] = 0
+                    else:
+                        s[(i, j, m)] = int(rnd.randint(0, max_setup))
+
+    out["s"] = s
+    return out
+
+
