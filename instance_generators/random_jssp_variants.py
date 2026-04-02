@@ -12,6 +12,7 @@ is not modified.
 from typing import Dict, Any, List, Tuple
 import random
 import copy
+import math
 
 
 def generate_fjssp_variant(data: Dict[str, Any], min_m: int = 1, max_m: int = 3, seed: int = None) -> Dict[str, Any]:
@@ -261,4 +262,83 @@ def generate_sdst_mixed_variant(
                 s[(i, j, m)] = s_val
 
     out["s"] = s
+    return out
+
+
+def generate_deadlines_variant(
+    data: Dict[str, Any],
+    deadline_density: float = 0.3,
+    gamma_min: float = 1.3,
+    gamma_max: float = 1.6,
+    noise_ratio: float = 0.2,
+    seed: int = None
+) -> Dict[str, Any]:
+    """Generate integer deadlines for a subset of jobs.
+
+    Parameters:
+    - data: input instance dictionary (not modified).
+    - deadline_density: fraction of jobs to assign deadlines (floor applied).
+    - gamma_min/gamma_max: range for multiplicative factor on job duration.
+    - noise_ratio: fraction of L_j used as upper bound for additive noise.
+    - seed: random seed for reproducibility.
+
+    Behavior:
+    - Select exactly floor(deadline_density * num_jobs) jobs uniformly at random
+      (without replacement).
+    - Compute job duration L_j as the sum of per-task processing times. For each
+      task, any available (machine, worker) processing time from `p` is used
+      (the minimum found is selected; fallback to 1 if none).
+    - For each selected job j, sample gamma_j ~ Uniform(gamma_min, gamma_max)
+      and noise ~ Uniform(0, noise_ratio * L_j). Deadline d_j = r_j +
+      gamma_j * L_j + noise, then rounded up to an integer and ensured to be
+      at least r_j + L_j.
+
+    Returns a deep copy of `data` with key "deadlines" mapping job_id -> int.
+    """
+    rnd = random.Random(seed)
+    out = copy.deepcopy(data)
+
+    job_tasks: Dict[Any, List[Any]] = out.get("job_tasks", {})
+    jobs = list(job_tasks.keys())
+    num_jobs = len(jobs)
+
+    # number of deadlines to assign
+    k = int(math.floor(deadline_density * num_jobs)) if num_jobs > 0 else 0
+
+    selected_jobs: List[Any] = rnd.sample(jobs, k) if k > 0 else []
+
+    # prepare p with tuple keys for easy lookup
+    orig_p: Dict[Tuple[Any, Any, Any], float] = {tuple(k): float(v) for k, v in out.get("p", {}).items()}
+
+    deadlines: Dict[Any, int] = {}
+
+    for j in selected_jobs:
+        tasks = job_tasks.get(j, [])
+        # compute L_j as sum of a chosen processing time per task
+        L_j = 0.0
+        for t in tasks:
+            vals = [v for (tt, mm, ww), v in orig_p.items() if tt == t]
+            if vals:
+                # choose the minimum available processing time for stability
+                L_j += float(min(vals))
+            else:
+                L_j += 1.0
+
+        # release date for job (default 0)
+        r_j = int(out.get("release_dates", {}).get(j, 0))
+
+        # sample gamma and noise
+        gamma_j = rnd.uniform(float(gamma_min), float(gamma_max))
+        noise = rnd.uniform(0.0, float(noise_ratio) * L_j) if L_j > 0 else 0.0
+
+        d = float(r_j) + gamma_j * L_j + noise
+        min_allowed = float(r_j) + L_j
+        if d < min_allowed:
+            d = min_allowed
+
+        # round up to integer to ensure deadline >= min_allowed
+        d_int = int(math.ceil(d))
+        deadlines[j] = d_int
+
+    out["deadlines"] = deadlines
     return out
