@@ -342,3 +342,113 @@ def generate_deadlines_variant(
 
     out["deadlines"] = deadlines
     return out
+
+
+def generate_dual_resources_variant(
+    data: Dict[str, Any],
+    rho_workers: float = 1.0,
+    compatibility_prob: float = 0.3,
+    delta: float = 0.2,
+    seed: int = None
+) -> Dict[str, Any]:
+    """Add dual resources (workers) and compatible processing times.
+
+    Parameters:
+    - data: input instance dictionary (not modified).
+    - rho_workers: multiplier for number of workers relative to machines
+      (num_workers = floor(rho_workers * len(machines))).
+    - compatibility_prob: probability a worker is compatible with a machine
+      during the random compatibility step.
+    - delta: relative noise range for processing times (epsilon in [-delta,delta]).
+    - seed: random seed for reproducibility.
+
+    Returns a deep copy of `data` with updated keys:
+    - "workers": list of worker ids (ints)
+    - "W_m": mapping worker -> list of machines the worker can operate
+    - "p": mapping (task, machine, worker) -> int processing time
+
+    Notes:
+    - If no base processing time is found for a (task,machine) pair, a
+      default of 1 is used.
+    - All generated processing times are integers >= 1.
+    """
+    rnd = random.Random(seed)
+    out = copy.deepcopy(data)
+
+    machines = list(out.get("machines", []))
+    tasks = list(out.get("tasks", []))
+
+    num_machines = len(machines)
+    num_workers = int(math.floor(float(rho_workers) * float(num_machines))) if num_machines > 0 else 0
+
+    # generate worker ids 0..num_workers-1
+    workers = list(range(num_workers))
+
+    # initialize worker -> set(machine) mapping
+    W_m_worker: Dict[int, set] = {w: set() for w in workers}
+
+    # Step 1: coverage - ensure every machine has at least one worker
+    if workers:
+        for m in machines:
+            w = rnd.choice(workers)
+            W_m_worker[w].add(m)
+
+        # Step 2: random compatibility for remaining worker-machine pairs
+        for w in workers:
+            assigned = W_m_worker[w]
+            for m in machines:
+                if m in assigned:
+                    continue
+                if rnd.random() <= float(compatibility_prob):
+                    assigned.add(m)
+
+    # convert sets to sorted lists for determinism
+    W_m_out: Dict[Any, List[Any]] = {w: sorted(list(ms)) for w, ms in W_m_worker.items()}
+
+    # Prepare base processing times per (task,machine)
+    orig_p: Dict[Tuple[Any, Any, Any], float] = {tuple(k): float(v) for k, v in out.get("p", {}).items()}
+    base_p: Dict[Tuple[Any, Any], float] = {}
+    for (t, m, w), val in orig_p.items():
+        key = (t, m)
+        if key in base_p:
+            # keep minimum found as stable baseline
+            base_p[key] = min(base_p[key], float(val))
+        else:
+            base_p[key] = float(val)
+
+    # Build new p for all compatible (task,machine,worker)
+    new_p: Dict[Tuple[Any, Any, Any], int] = {}
+    for t in tasks:
+        for m in machines:
+            key = (t, m)
+            p_base = float(base_p.get(key, 1.0))
+            if not workers:
+                # no workers: preserve any existing worker-agnostic entries if present
+                # try to keep original entries unchanged
+                vals = [v for (tt, mm, ww), v in orig_p.items() if tt == t and mm == m]
+                if vals:
+                    # reinsert existing tuples (preserve worker identifier if present)
+                    for (tt, mm, ww), v in orig_p.items():
+                        if tt == t and mm == m:
+                            new_p[(t, m, ww)] = max(1, int(round(float(v))))
+                else:
+                    # no original entry, nothing to add
+                    continue
+            else:
+                for w in workers:
+                    if m not in W_m_worker.get(w, set()):
+                        continue
+                    # sample epsilon in [-delta, delta]
+                    eps = rnd.uniform(-float(delta), float(delta))
+                    val = float(p_base) * (1.0 + eps)
+                    # convert to integer and ensure at least 1
+                    p_int = max(1, int(round(val)))
+                    new_p[(t, m, w)] = p_int
+
+    # update out
+    out["workers"] = workers
+    out["W_m"] = W_m_out
+    # represent p keys as tuples (they already are)
+    out["p"] = {k: v for k, v in new_p.items()}
+
+    return out
