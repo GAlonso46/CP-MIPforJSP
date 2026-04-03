@@ -5,6 +5,10 @@ Provides the following functions:
 - generate_fjssp_variant
 - generate_timelags_variant
 - generate_release_dates_variant
+- generate_sdst_uniform_variant
+- generate_sdst_mixed_variant
+- generate_deadlines_variant
+- generate_dual_resources_variant
 
 All functions return a new data dictionary (deep copy) so the original input
 is not modified.
@@ -20,10 +24,12 @@ def generate_fjssp_variant(data: Dict[str, Any], min_m: int = 1, max_m: int = 3,
     to each task and creating consistent processing times for each (t,m,w).
 
     - min_m, max_m: minimum/maximum number of eligible machines per task.
-    - The function preserves the set of workers (W_t) for tasks. For each new
-      (task, machine, worker) combination a processing time is sampled around
-      the original task's typical processing time.
+    - Processing times are generated for each (task, machine, worker) combination
+      using the compatibility defined in W_m.
     """
+    import random
+    import copy
+
     rnd = random.Random(seed)
     out = copy.deepcopy(data)
 
@@ -44,7 +50,15 @@ def generate_fjssp_variant(data: Dict[str, Any], min_m: int = 1, max_m: int = 3,
 
     # build new M_t and p
     new_M_t: Dict[Any, List[Any]] = {}
-    new_p: Dict[Tuple[Any, Any, Any], float] = {}
+    new_p: Dict[Tuple[Any, Any, Any], int] = {}
+
+    # Precompute machine -> workers from W_m
+    W_m = out.get("W_m", {})
+    machine_to_workers: Dict[Any, List[Any]] = {m: [] for m in machines}
+    for w, m_list in W_m.items():
+        for m in m_list:
+            if m in machine_to_workers:
+                machine_to_workers[m].append(w)
 
     for t in out.get("tasks", []):
         # choose k machines between min_m and max_m (clipped to available)
@@ -52,21 +66,22 @@ def generate_fjssp_variant(data: Dict[str, Any], min_m: int = 1, max_m: int = 3,
         chosen = rnd.sample(machines, k)
         new_M_t[t] = chosen
 
-        # for each chosen machine and each eligible worker, assign a processing time
+        # baseline
         b = baseline.get(t, 1.0)
-        # define sampling window relative to baseline
-        low = max(1, int(max(1, b * 0.5)))
-        high = max(low, int(b * 1.5) + 1)
+
+        # sampling window
+        low = max(1, int(b * 0.5))
+        high = max(low, int(b * 1.5))
+
         for m in chosen:
-            # use provided W_t if exists, else all workers
-            wlist = out.get("W_t", {}).get(t, workers)
+            wlist = machine_to_workers.get(m, [])
             for w in wlist:
-                pt = float(rnd.randint(low, high))
+                pt = rnd.randint(low, high)
                 new_p[(t, m, w)] = pt
 
     out["M_t"] = new_M_t
-    out["p"] = {k: v for k, v in new_p.items()}
-    # keep W_t unchanged
+    out["p"] = new_p
+
     return out
 
 
