@@ -8,51 +8,43 @@ import os
 
 def save_extended_jssp_instance(instance, folder_path, file_name):
     """
-    Saves or overwrites an extended JSSP instance dictionary into a JSON file.
+    Saves an extended JSSP instance to a JSON file, converting complex keys 
+    (tuples) into strings for JSON compatibility.
 
     Args:
-        instance (dict): Dictionary containing the following keys:
-            - machines: list of machine ids (ints)
-            - workers: list of worker ids (ints)
-            - tasks: list of task ids (tuples: (job_id, op_idx))
-            - job_tasks: mapping job_id -> list of task ids
-            - M_t: mapping task -> list of eligible machines
-            - W_m: mapping worker -> list of machines the worker can operate
-            - p: mapping (task, machine, worker) -> processing_time (int)
-            - P: list of precedence arcs (task_prev, task_next)
-        folder_path (str): Path to the directory where the file will be saved.
-        file_name (str): Name of the output file (e.g., 'instance_01.json').
-
-    Returns:
-        str: The full path to the saved file.
+        instance (dict): Instance data containing 'machines', 'workers', 'tasks',
+            'job_tasks', 'P', 'L', 'release_dates', 'deadlines', 'M_t', 'W_m', 'p', and 's'.
+        folder_path (str): Directory to store the file.
+        file_name (str): Name of the file.
     """
-    
-    # Ensure the directory exists
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
     
     full_path = os.path.join(folder_path, file_name)
 
-    # JSON does not support tuples as keys or elements. 
-    # We must convert tuple-based keys and lists to string representations.
-    serializable_instance = {
+    # Helper to convert task tuple (job, op) to "job_op" string
+    def t_str(t): return f"{t[0]}_{t[1]}"
+
+    serializable = {
         "machines": instance["machines"],
         "workers": instance.get("workers", [0]),
-        # Convert task tuples (job_id, op_idx) to strings "job_id_op_idx"
-        "tasks": [f"{t[0]}_{t[1]}" for t in instance["tasks"]],
-        "job_tasks": {str(k): [f"{t[0]}_{t[1]}" for t in v] 
-                      for k, v in instance["job_tasks"].items()},
-        "M_t": {f"{t[0]}_{t[1]}": v for t, v in instance["M_t"].items()},
-        "W_m": {str(k): v for k, v in instance.get("W_m", {}).items()},
-        # Convert (task, machine, worker) keys to a single string key
-        "p": {f"{t[0]}_{t[1]}|{m}|{w}": val 
-              for (t, m, w), val in instance["p"].items()},
-        # Convert precedence arcs (task_prev, task_next) to string pairs
-        "P": [[f"{t1[0]}_{t1[1]}", f"{t2[0]}_{t2[1]}"] for t1, t2 in instance["P"]]
+        "tasks": [t_str(t) for t in instance["tasks"]],
+        "job_tasks": {str(j): [t_str(t) for t in ts] for j, ts in instance["job_tasks"].items()},
+        "P": [[t_str(t1), t_str(t2)] for t1, t2 in instance.get("P", [])],
+        # Temporal parameters (L, release_dates, deadlines)
+        "L": {f"{t_str(pair[0])}|{t_str(pair[1])}": int(v) for pair, v in instance.get("L", {}).items()},
+        "release_dates": {str(j): int(v) for j, v in instance.get("release_dates", {}).items()},
+        "deadlines": {str(j): int(v) for j, v in instance.get("deadlines", {}).items()},
+        # Mappings
+        "M_t": {t_str(t): ms for t, ms in instance["M_t"].items()},
+        "W_m": {str(w): ms for w, ms in instance.get("W_m", {}).items()},
+        # Processing times: ((job, op), m, w) -> "job_op|m|w"
+        "p": {f"{t_str(k[0])}|{k[1]}|{k[2]}": int(v) for k, v in instance["p"].items()},
+        # Setup times: ((job_i, op_i), (job_k, op_k), m) -> "job_i_op_i|job_k_op_k|m"
+        "s": {f"{t_str(k[0])}|{t_str(k[1])}|{k[2]}": int(v) for k, v in instance.get("s", {}).items()}
     }
 
     with open(full_path, 'w', encoding='utf-8') as f:
-        json.dump(serializable_instance, f, indent=4)
+        json.dump(serializable, f, indent=4)
     
-    print(f"Instance successfully saved to: {full_path}")
     return full_path
