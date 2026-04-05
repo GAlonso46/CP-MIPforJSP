@@ -6,7 +6,7 @@ Run: python3 tests/test_convert_and_parse.py
 """
 from instance_generators.random_jssp import generate_instance, instance_to_string
 from utils.convert_to_ta import write_instance_to_ta_file, convert_instance_to_ta_format
-from utils.parse_ta import parse_ta_file
+from utils.load_ta import parse_ta_file
 import os
 
 
