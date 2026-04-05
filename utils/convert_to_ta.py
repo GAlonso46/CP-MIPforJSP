@@ -1,6 +1,5 @@
 """
-Utilities to convert JSSP instances (as produced by generate_instance) into the "ta" text format
-used by the provided example files (e.g. `ta11`).
+Utilities to convert JSSP instances (as produced by generate_instance) into the "ta" text format.
 
 The format produced by `convert_instance_to_ta_format` is:
 
@@ -80,7 +79,7 @@ def write_instance_to_ta_file(instance: Dict, path: str, filename: str) -> str:
     Args:
         instance: JSSP instance dictionary (same format as input of convert_instance_to_ta_format).
         path: directory path where the file will be created. If it does not exist it will be created.
-        filename: name of the file to create (e.g. 'ta11').
+        filename: name of the file to create.
 
     Returns:
         The full path to the written file as a string.
