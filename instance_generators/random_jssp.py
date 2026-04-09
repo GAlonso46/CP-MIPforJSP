@@ -30,6 +30,7 @@ This file can also be executed as a script to generate an instance from the comm
 from typing import Dict, Optional
 import random
 import json
+import datetime
 
 
 def generate_instance(j: int, m: int, seed: Optional[int] = None) -> Dict:
@@ -64,6 +65,14 @@ def generate_instance(j: int, m: int, seed: Optional[int] = None) -> Dict:
                 "processing_time": proc_time,
             })
         instance["jobs"].append({"job_id": job_id, "operations": ops})
+
+    # attach metadata in nested dict
+    instance["metadata"] = {
+        "seed": seed,
+        "generator_version": "1.0",
+        "variant": "JSSP",
+        "creation_date": datetime.date.today().isoformat(),
+    }
 
     return instance
 
