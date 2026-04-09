@@ -43,6 +43,9 @@ def save_extended_jssp_instance(instance, folder_path, file_name):
         # Setup times: ((job_i, op_i), (job_k, op_k), m) -> "job_i_op_i|job_k_op_k|m"
         "s": {f"{t_str(k[0])}|{t_str(k[1])}|{k[2]}": int(v) for k, v in instance.get("s", {}).items()}
     }
+    # Include metadata if present
+    if "metadata" in instance:
+        serializable["metadata"] = instance["metadata"]
 
     with open(full_path, 'w', encoding='utf-8') as f:
         json.dump(serializable, f, indent=4)
