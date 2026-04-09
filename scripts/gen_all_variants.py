@@ -61,7 +61,7 @@ def generate_all_variants() -> None:
         {
             "prefix": "f_jssp", 
             "func": generate_fjssp_variant, 
-            "kwargs": {"min_m": 1, "max_m": 3}
+            "kwargs": {"min_m": 1, "max_m_fraction": 0.7, "variation": 0.2}
         },
         {
             "prefix": "t_jssp", 
