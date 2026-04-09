@@ -82,6 +82,13 @@ def generate_fjssp_variant(data: Dict[str, Any], min_m: int = 1, max_m: int = 3,
     out["M_t"] = new_M_t
     out["p"] = new_p
 
+    out["metadata"] = {
+        "seed": seed,
+        "generator_version": "1.0",
+        "variant": "FJSSP",
+        "creation_date": __import__("datetime").date.today().isoformat(),
+    }
+
     return out
 
 
@@ -112,6 +119,12 @@ def generate_timelags_variant(data: Dict[str, Any], density: float = 0.3, min_la
         L[pair] = rnd.randint(min_lag, max_lag)
 
     out["L"] = {k: v for k, v in L.items()}
+    out["metadata"] = {
+        "seed": seed,
+        "generator_version": "1.0",
+        "variant": "TJSSP",
+        "creation_date": __import__("datetime").date.today().isoformat(),
+    }
     return out
 
 
@@ -144,6 +157,12 @@ def generate_release_dates_variant(base_data: Dict[str, Any], job_prob: float = 
             release_dates[j] = int(round(r))
 
     out["release_dates"] = release_dates
+    out["metadata"] = {
+        "seed": seed,
+        "generator_version": "1.0",
+        "variant": "RJSSP",
+        "creation_date": __import__("datetime").date.today().isoformat(),
+    }
     return out
 
 
@@ -196,6 +215,12 @@ def generate_sdst_uniform_variant(
                         s[(i, j, m)] = int(rnd.randint(0, max_setup))
 
     out["s"] = s
+    out["metadata"] = {
+        "seed": seed,
+        "generator_version": "1.0",
+        "variant": "SDSTJSSP",
+        "creation_date": __import__("datetime").date.today().isoformat(),
+    }
     return out
 
 
@@ -277,6 +302,12 @@ def generate_sdst_mixed_variant(
                 s[(i, j, m)] = s_val
 
     out["s"] = s
+    out["metadata"] = {
+        "seed": seed,
+        "generator_version": "2.0",
+        "variant": "SDSTJSSP",
+        "creation_date": __import__("datetime").date.today().isoformat(),
+    }
     return out
 
 
@@ -356,6 +387,12 @@ def generate_deadlines_variant(
         deadlines[j] = d_int
 
     out["deadlines"] = deadlines
+    out["metadata"] = {
+        "seed": seed,
+        "generator_version": "1.0",
+        "variant": "DJSSP",
+        "creation_date": __import__("datetime").date.today().isoformat(),
+    }
     return out
 
 
@@ -466,4 +503,10 @@ def generate_dual_resources_variant(
     # represent p keys as tuples (they already are)
     out["p"] = {k: v for k, v in new_p.items()}
 
+    out["metadata"] = {
+        "seed": seed,
+        "generator_version": "1.0",
+        "variant": "DRCJSSP",
+        "creation_date": __import__("datetime").date.today().isoformat(),
+    }
     return out
