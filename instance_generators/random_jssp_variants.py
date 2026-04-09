@@ -19,28 +19,54 @@ import copy
 import math
 
 
-def generate_fjssp_variant(data: Dict[str, Any], min_m: int = 1, max_m: int = 3, seed: int = None) -> Dict[str, Any]:
-    """Generate a Flexible JSSP variant by assigning a random subset of machines
-    to each task and creating consistent processing times for each (t,m,w).
-
-    - min_m, max_m: minimum/maximum number of eligible machines per task.
-    - Processing times are generated for each (task, machine, worker) combination
-      using the compatibility defined in W_m.
+def generate_fjssp_variant(
+    data: Dict[str, Any],
+    min_m: int = 1,
+    max_m_fraction: float = 0.5,
+    variation: float = 0.2,
+    seed: int = None
+) -> Dict[str, Any]:
     """
-    import random
-    import copy
+    Generate a Flexible JSSP variant.
+
+    Key features:
+    - Each task is assigned a random subset of eligible machines.
+    - The maximum number of machines is defined as a fraction of total machines.
+    - Processing times are generated coherently per task:
+        - Each task has a baseline processing time.
+        - Each machine gets a value in a proportional neighborhood of the baseline.
+        - The same processing time is used for all compatible workers on that machine.
+
+    Parameters
+    ----------
+    data : Dict[str, Any]
+        Base JSSP instance.
+    min_m : int
+        Minimum number of machines per task.
+    max_m_fraction : float
+        Fraction of total machines used to compute maximum machines per task.
+    variation : float
+        Relative variation around the baseline processing time (e.g., 0.2 = ±20%).
+    seed : int
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    Dict[str, Any]
+        New instance with updated M_t and p.
+    """
 
     rnd = random.Random(seed)
     out = copy.deepcopy(data)
 
-    machines = list(out.get("machines", []))
-    workers = list(out.get("workers", []))
+    machines: List[Any] = list(out.get("machines", []))
+    workers: List[Any] = list(out.get("workers", []))
 
-    # Ensure raw p exists; convert keys to tuples
+    # Convert original processing times to consistent format
     orig_p = {tuple(k): float(v) for k, v in out.get("p", {}).items()}
 
-    # compute a baseline processing time per task from original p if available
-    baseline = {}
+    # --- Compute baseline processing time per task ---
+    baseline: Dict[Any, float] = {}
     for t in out.get("tasks", []):
         vals = [v for (tt, mm, ww), v in orig_p.items() if tt == t]
         if vals:
@@ -48,11 +74,12 @@ def generate_fjssp_variant(data: Dict[str, Any], min_m: int = 1, max_m: int = 3,
         else:
             baseline[t] = 1.0
 
-    # build new M_t and p
-    new_M_t: Dict[Any, List[Any]] = {}
-    new_p: Dict[Tuple[Any, Any, Any], int] = {}
+    # --- Compute max machines from fraction ---
+    num_machines = len(machines)
+    max_m = max(min_m, int(max_m_fraction * num_machines))
+    max_m = min(max_m, num_machines)
 
-    # Precompute machine -> workers from W_m
+    # --- Build machine -> workers mapping ---
     W_m = out.get("W_m", {})
     machine_to_workers: Dict[Any, List[Any]] = {m: [] for m in machines}
     for w, m_list in W_m.items():
@@ -60,24 +87,29 @@ def generate_fjssp_variant(data: Dict[str, Any], min_m: int = 1, max_m: int = 3,
             if m in machine_to_workers:
                 machine_to_workers[m].append(w)
 
-    for t in out.get("tasks", []):
-        # choose k machines between min_m and max_m (clipped to available)
-        k = rnd.randint(min_m, max(min_m, min(max_m, len(machines))))
-        chosen = rnd.sample(machines, k)
-        new_M_t[t] = chosen
+    new_M_t: Dict[Any, List[Any]] = {}
+    new_p: Dict[Tuple[Any, Any, Any], int] = {}
 
-        # baseline
+    # --- Main generation ---
+    for t in out.get("tasks", []):
+        # Select number of machines
+        k = rnd.randint(min_m, max_m)
+        chosen_machines = rnd.sample(machines, k)
+        new_M_t[t] = chosen_machines
+
         b = baseline.get(t, 1.0)
 
-        # sampling window
-        low = max(1, int(b * 0.5))
-        high = max(low, int(b * 1.5))
+        # Compute proportional neighborhood
+        low = max(1, int((1.0 - variation) * b))
+        high = max(low + 1, int((1.0 + variation) * b))
 
-        for m in chosen:
-            wlist = machine_to_workers.get(m, [])
-            for w in wlist:
-                pt = rnd.randint(low, high)
-                new_p[(t, m, w)] = pt
+        for m in chosen_machines:
+            # Generate one processing time per (task, machine)
+            pt_m = rnd.randint(low, high)
+
+            # Assign same value to all compatible workers
+            for w in machine_to_workers.get(m, []):
+                new_p[(t, m, w)] = pt_m
 
     out["M_t"] = new_M_t
     out["p"] = new_p
