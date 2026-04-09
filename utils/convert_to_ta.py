@@ -86,6 +86,12 @@ def write_instance_to_ta_file(instance: Dict, path: str, filename: str) -> str:
     """
     content = convert_instance_to_ta_format(instance)
 
+    # Prepend metadata as commented lines if available
+    md = instance.get("metadata")
+    if isinstance(md, dict):
+        meta_lines = [f"# {k}: {v}" for k, v in md.items()]
+        content = "\n".join(meta_lines) + "\n" + content
+
     out_dir = Path(path)
     out_dir.mkdir(parents=True, exist_ok=True)
 
