@@ -86,7 +86,7 @@ def generate_all_variants() -> None:
         {
             "prefix": "drc_jssp", 
             "func": generate_dual_resources_variant, 
-            "kwargs": {"rho_workers": 1.0, "compatibility_prob": 0.3, "delta": 0.2}
+            "kwargs": {"rho_workers": 0.7, "compatibility_prob": 0.3, "delta": 0.2}
         }
     ]
 
