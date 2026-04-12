@@ -124,28 +124,54 @@ def generate_fjssp_variant(
     return out
 
 
-def generate_timelags_variant(data: Dict[str, Any], density: float = 0.3, min_lag: int = 1, max_lag: int = 10, seed: int = None) -> Dict[str, Any]:
-    """Add time lags between consecutive tasks of the same job.
+def generate_timelags_variant(
+    data: Dict[str, Any],
+    density: float = 0.3,
+    min_lag: int = 1,
+    max_lag_factor: float = 0.5,
+    seed: int = None
+) -> Dict[str, Any]:
+    """
+    Add time lags between consecutive tasks of the same job.
 
     For each consecutive pair (t_i, t_{i+1}) in a job, with probability
-    `density` add a lag uniformly sampled between min_lag and max_lag.
-    If no lag is created (zero total), force one random consecutive pair to
-    have a lag so the variant is active.
+    `density` a lag is added. The lag is uniformly sampled between
+    `min_lag` and a dynamically computed maximum lag based on the
+    average processing time of the instance.
+
+    The maximum lag is defined as:
+        max_lag = max_lag_factor * avg_processing_time
+
+    If no lag is created (i.e., zero total), one random consecutive pair
+    is forced to have a lag to ensure the variant is active.
     """
     rnd = random.Random(seed)
     out = copy.deepcopy(data)
 
+    # --- Compute average processing time ---
+    p_values = list(out.get("p", {}).values())
+    if not p_values:
+        raise ValueError("Processing times 'p' cannot be empty.")
+
+    avg_p = sum(p_values) / len(p_values)
+
+    # Compute dynamic max_lag (ensure integer and >= min_lag)
+    max_lag = max(min_lag, int(max_lag_factor * avg_p))
+
     L = {}
     tasks_with_pairs: List[Tuple[Any, Any]] = []
+
+    # --- Generate time lags ---
     for j, tlist in out.get("job_tasks", {}).items():
         for idx in range(len(tlist) - 1):
             i = tlist[idx]
             k = tlist[idx + 1]
             tasks_with_pairs.append((i, k))
+
             if rnd.random() <= density:
                 L[(i, k)] = rnd.randint(min_lag, max_lag)
 
-    # ensure at least one lag exists
+    # --- Ensure at least one lag exists ---
     if len(L) == 0 and tasks_with_pairs:
         pair = rnd.choice(tasks_with_pairs)
         L[pair] = rnd.randint(min_lag, max_lag)
@@ -157,6 +183,7 @@ def generate_timelags_variant(data: Dict[str, Any], density: float = 0.3, min_la
         "variant": "TJSSP",
         "creation_date": __import__("datetime").date.today().isoformat(),
     }
+
     return out
 
 

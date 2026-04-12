@@ -66,7 +66,7 @@ def generate_all_variants() -> None:
         {
             "prefix": "t_jssp", 
             "func": generate_timelags_variant, 
-            "kwargs": {"density": 0.3, "min_lag": 1, "max_lag": 10}
+            "kwargs": {"density": 0.3, "min_lag": 1, "max_lag_factor": 0.5}
         },
         {
             "prefix": "r_jssp", 
