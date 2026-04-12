@@ -187,33 +187,54 @@ def generate_timelags_variant(
     return out
 
 
-def generate_release_dates_variant(base_data: Dict[str, Any], job_prob: float = 0.4, max_r_ratio: float = 0.5, seed: int = None) -> Dict[str, Any]:
-    """Generate release dates for a subset of jobs.
+def generate_release_dates_variant(
+    data: Dict[str, Any],
+    job_prob: float = 0.4,
+    max_r_ratio: float = 0.5,
+    seed: int = None
+) -> Dict[str, Any]:
+    """
+    Generate release dates for a subset of jobs based on estimated average machine workload.
 
-    - Compute a simple makespan upper bound as the sum of per-task maximum
-      processing times (across modes). For each job, with probability
-      job_prob, assign a release date uniformly in [0, makespan * max_r_ratio].
+    The upper bound for release dates is computed as the total average processing
+    time per task divided by the number of machines. For each job, with probability
+    `job_prob`, a release date is sampled uniformly in [0, bound * max_r_ratio].
     """
     rnd = random.Random(seed)
-    out = copy.deepcopy(base_data)
+    out = copy.deepcopy(data)
 
-    # estimate makespan upper bound (sum of max processing times per task)
-    sum_max_p = 0
-    for t in out.get("tasks", []):
-        max_p_t = 0
-        # if p uses tuple keys, iterate
-        for (tt, mm, ww), val in out.get("p", {}).items():
-            if tt == t:
-                max_p_t = max(max_p_t, float(val))
-        # fallback to 1 if nothing found
-        sum_max_p += max(1.0, max_p_t)
+    p_dict = out.get("p", {})
+    if not p_dict:
+        raise ValueError("Processing times 'p' cannot be empty.")
 
-    bound = float(sum_max_p)
+    # --- Identify machines and group processing times by task ---
+    machines = set()
+    task_p: Dict[Any, list] = {}
+
+    for (t, m, w), val in p_dict.items():
+        machines.add(m)
+        if t not in task_p:
+            task_p[t] = []
+        task_p[t].append(int(val))
+
+    num_machines = len(machines) if machines else 1
+
+    # --- Compute sum of average processing time per task ---
+    sum_avg_p = 0
+    for t, p_list in task_p.items():
+        avg_t = sum(p_list) / len(p_list)
+        sum_avg_p += avg_t
+
+    # --- Estimated average workload per machine ---
+    bound = sum_avg_p / num_machines
+
+    # --- Generate release dates ---
     release_dates: Dict[Any, int] = {}
+
     for j in out.get("job_tasks", {}).keys():
         if rnd.random() <= job_prob:
-            r = rnd.uniform(0, bound * float(max_r_ratio))
-            release_dates[j] = int(round(r))
+            r = rnd.uniform(0, bound * max_r_ratio)
+            release_dates[j] = int(r)
 
     out["release_dates"] = release_dates
     out["metadata"] = {
@@ -222,6 +243,7 @@ def generate_release_dates_variant(base_data: Dict[str, Any], job_prob: float = 
         "variant": "RJSSP",
         "creation_date": __import__("datetime").date.today().isoformat(),
     }
+
     return out
 
 
