@@ -79,7 +79,7 @@ def generate_all_variants() -> None:
             "kwargs": {"deadline_density": 0.3, "gamma_min": 1.3, "gamma_max": 1.6, "noise_ratio": 0.2}
         },
         {
-            "prefix": "sdst_fjjsp", 
+            "prefix": "sdst_jssp", 
             "func": generate_sdst_uniform_variant, 
             "kwargs": {"alpha": 0.5}
         },
