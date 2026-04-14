@@ -78,9 +78,9 @@ def parse_ta_file(path: str) -> Dict[str, Any]:
         machines = list(range(num_machines))
 
     # single worker default (parser cannot infer workers from TA format)
-    workers = [0]
+    workers = []
     # worker->machines capability: default worker can operate all machines
-    W_m: Dict[Any, List[Any]] = {0: list(machines)}
+    W_m: Dict[Any, List[Any]] = {}
 
     tasks = []
     job_tasks: Dict[Any, List[Any]] = {}
