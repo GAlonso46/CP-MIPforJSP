@@ -9,6 +9,7 @@ from pathlib import Path
 from utils.load_ta import parse_ta_file
 from models.jssp_cp import JSSPCpModel
 from models.jssp_milp import JSSPMilpModel
+from models.jssp_scip import JSSPScipModel
 
 
 def list_smallest_instances(folder: Path):
@@ -18,7 +19,7 @@ def list_smallest_instances(folder: Path):
     if folder.name == 'basic_jssp':
         selected = [f for f in files if f.name.startswith(('small01', 'small02', 'small03', 'small04', 'small05', 'small06', 'small07', 'small08', 'small09', 'small10'))][:10]
     else:
-        selected = [f for f in files if f.name.endswith(('001','002','003','004','005','006','007','008','009','010'))][:10]
+        selected = [f for f in files if f.name.endswith(('001.json','002.json','003.json','004.json','005.json','006.json','007.json','008.json','009.json','010.json'))][:10]
     return selected
 
 
@@ -34,7 +35,7 @@ def solve_and_record(path: Path, results_dir: Path):
     # CP
     cp_model = JSSPCpModel(data)
     t0 = time.time()
-    res_cp = cp_model.optimize(time_limit_seconds=5)
+    res_cp = cp_model.optimize(time_limit_seconds=30)
     t1 = time.time()
     rec['cp'] = {
         'status': res_cp.get('status'),
@@ -43,14 +44,25 @@ def solve_and_record(path: Path, results_dir: Path):
         'selected_modes': res_cp.get('solution', {}).get('selected_modes', [])
     }
 
-    # MILP
-    milp_model = JSSPMilpModel(data)
+    # MILP (Gurobi)
+    #milp_model = JSSPMilpModel(data)
+    #t0 = time.time()
+    #res_milp = milp_model.optimize(time_limit=30)
+    #t1 = time.time()
+    #rec['milp'] = {
+    #    'status': res_milp.get('status'),
+    #    'obj': res_milp.get('obj_val'),
+    #    'time': t1 - t0,
+    #}
+
+    # MILP (SCIP)
+    scip_model = JSSPScipModel(data)
     t0 = time.time()
-    res_milp = milp_model.optimize(time_limit=5)
+    res_scip = scip_model.optimize(time_limit=30)
     t1 = time.time()
-    rec['milp'] = {
-        'status': res_milp.get('status'),
-        'obj': res_milp.get('obj_val'),
+    rec['scip'] = {
+        'status': res_scip.get('status'),
+        'obj': res_scip.get('obj_val'),
         'time': t1 - t0,
     }
 
@@ -69,7 +81,9 @@ def test_all_variants():
     results_root.mkdir(exist_ok=True)
 
     for folder in instances_dir.iterdir():
+        #print(f"Processing folder: {folder.name}")
         if not folder.is_dir():
+        #    print(f"Skipping {folder.name} as it is not a directory.")
             continue
         selected = list_smallest_instances(folder)
         folder_results = results_root / folder.name
@@ -77,7 +91,7 @@ def test_all_variants():
         for path in selected:
             try:
                 rec = solve_and_record(path, folder_results)
-                print(f"Solved {path} -> cp:{rec['cp']['status']} milp:{rec['milp']['status']}")
+                print(f"Solved {path} -> cp:{rec['cp']['status']} scip:{rec['scip']['status']}")
             except Exception as e:
                 print(f"Failed {path}: {e}")
 
