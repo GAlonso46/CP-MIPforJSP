@@ -7,6 +7,7 @@ import time
 import json
 from pathlib import Path
 from utils.load_ta import parse_ta_file
+from utils. load_json import load_extended_jssp_instance
 from models.jssp_cp import JSSPCpModel
 from models.jssp_milp import JSSPMilpModel
 from models.jssp_scip import JSSPScipModel
@@ -24,7 +25,11 @@ def list_smallest_instances(folder: Path):
 
 
 def solve_and_record(path: Path, results_dir: Path):
-    data = parse_ta_file(str(path))
+    data = {}
+    if path.suffix == '.json':
+        data = load_extended_jssp_instance(str(path))
+    else:
+        data = parse_ta_file(str(path))    
 
     rec = {
         'instance': str(path),
