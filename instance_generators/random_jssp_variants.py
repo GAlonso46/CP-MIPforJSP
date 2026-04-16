@@ -233,8 +233,8 @@ def generate_release_dates_variant(
 
     for j in out.get("job_tasks", {}).keys():
         if rnd.random() <= job_prob:
-            r = rnd.uniform(0, bound * max_r_ratio)
-            release_dates[j] = int(r)
+            r = rnd.randint(0, int(bound * max_r_ratio))
+            release_dates[j] = r
 
     out["release_dates"] = release_dates
     out["metadata"] = {
@@ -512,7 +512,7 @@ def generate_dual_resources_variant(
     tasks = list(out.get("tasks", []))
 
     num_machines = len(machines)
-    num_workers = int(math.floor(float(rho_workers) * float(num_machines))) if num_machines > 0 else 0
+    num_workers = int(float(rho_workers) * float(num_machines)) if num_machines > 0 else 0
 
     # generate worker ids 0..num_workers-1
     workers = list(range(num_workers))
@@ -563,7 +563,7 @@ def generate_dual_resources_variant(
                     # reinsert existing tuples (preserve worker identifier if present)
                     for (tt, mm, ww), v in orig_p.items():
                         if tt == t and mm == m:
-                            new_p[(t, m, ww)] = max(1, int(round(float(v))))
+                            new_p[(t, m, ww)] = max(1, int(float(v)))
                 else:
                     # no original entry, nothing to add
                     continue
@@ -575,7 +575,7 @@ def generate_dual_resources_variant(
                     eps = rnd.uniform(-float(delta), float(delta))
                     val = float(p_base) * (1.0 + eps)
                     # convert to integer and ensure at least 1
-                    p_int = max(1, int(round(val)))
+                    p_int = max(1, int(val))
                     new_p[(t, m, w)] = p_int
 
     # update out
