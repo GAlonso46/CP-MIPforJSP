@@ -213,3 +213,6 @@ instances/r_jssp/
 instances/sdst_jssp/
 instances/t_jssp/
 instances/drc_jssp/
+
+# test_results folder
+tests/test_results/
