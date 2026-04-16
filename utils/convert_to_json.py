@@ -25,9 +25,11 @@ def save_extended_jssp_instance(instance, folder_path, file_name):
     # Helper to convert task tuple (job, op) to "job_op" string
     def t_str(t): return f"{t[0]}_{t[1]}"
 
+    workers_list = instance.get("workers") or []
+
     serializable = {
         "machines": instance["machines"],
-        "workers": instance.get("workers", [0]),
+        "workers": workers_list,
         "tasks": [t_str(t) for t in instance["tasks"]],
         "job_tasks": {str(j): [t_str(t) for t in ts] for j, ts in instance["job_tasks"].items()},
         "P": [[t_str(t1), t_str(t2)] for t1, t2 in instance.get("P", [])],
@@ -39,7 +41,7 @@ def save_extended_jssp_instance(instance, folder_path, file_name):
         "M_t": {t_str(t): ms for t, ms in instance["M_t"].items()},
         "W_m": {str(w): ms for w, ms in instance.get("W_m", {}).items()},
         # Processing times: ((job, op), m, w) -> "job_op|m|w"
-        "p": {f"{t_str(k[0])}|{k[1]}|{k[2]}": int(v) for k, v in instance["p"].items()},
+        "p": {f"{t_str(k[0])}|{k[1]}|{ 'null' if k[2] is None else k[2] }": int(v) for k, v in instance["p"].items()},
         # Setup times: ((job_i, op_i), (job_k, op_k), m) -> "job_i_op_i|job_k_op_k|m"
         "s": {f"{t_str(k[0])}|{t_str(k[1])}|{k[2]}": int(v) for k, v in instance.get("s", {}).items()}
     }
