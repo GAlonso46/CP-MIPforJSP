@@ -77,9 +77,9 @@ def parse_ta_file(path: str) -> Dict[str, Any]:
     if len(machines) != num_machines:
         machines = list(range(num_machines))
 
-    # single worker default (parser cannot infer workers from TA format)
+    # default empty (parser cannot infer workers from TA format)
     workers = []
-    # worker->machines capability: default worker can operate all machines
+    # worker->machines capability: default empty
     W_m: Dict[Any, List[Any]] = {}
 
     tasks = []
@@ -95,7 +95,7 @@ def parse_ta_file(path: str) -> Dict[str, Any]:
             job_task_list.append(task_id)
             M_t[task_id] = [machine]
             # only create p entries for feasible triples: here worker 0 can do all machines
-            p_dict[(task_id, machine, 0)] = int(proc)
+            p_dict[(task_id, machine, None)] = int(proc)
         job_tasks[j_idx] = job_task_list
 
     # precedence arcs: within each job, op_k -> op_{k+1}
