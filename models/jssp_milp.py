@@ -73,7 +73,11 @@ class JSSPMilpModel:
         # processing times
         self.p: Dict[Tuple[Any, Any, Any], int] = {}
         for key, value in d["p"].items():
-            self.p[tuple(key)] = int(round(float(value)))
+            if not self.workers:
+                normalized_key = (key[0], key[1], None)
+                self.p[normalized_key] = int(round(float(value)))
+            else:
+                self.p[tuple(key)] = int(round(float(value)))
 
         # setups
         self.s: Dict[Tuple[Any, Any, Any], int] = {}
@@ -93,13 +97,8 @@ class JSSPMilpModel:
                             if (t, mm, ww) in self.p:
                                 om_list.append((mm, ww))
                 else:
-                    # no workers: build mode with None as worker if any p entry matches (t,mm,*)
-                    found = False
-                    for key in self.p.keys():
-                        if key[0] == t and key[1] == mm:
-                            found = True
-                            break
-                    if found:
+                    # no workers: check directly if (task, mm, None) exists in normalized p
+                    if (t, mm, None) in self.p:
                         om_list.append((mm, None))
             self.OM_t[t] = om_list
             if not om_list:
