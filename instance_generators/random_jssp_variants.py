@@ -107,9 +107,12 @@ def generate_fjssp_variant(
             # Generate one processing time per (task, machine)
             pt_m = rnd.randint(low, high)
 
-            # Assign same value to all compatible workers
-            for w in machine_to_workers.get(m, []):
-                new_p[(t, m, w)] = pt_m
+            if workers:
+                # Assign same value to all compatible workers
+                for w in machine_to_workers.get(m, []):
+                    new_p[(t, m, w)] = pt_m
+            else:
+                new_p[(t, m, None)] = pt_m        
 
     out["M_t"] = new_M_t
     out["p"] = new_p
