@@ -1,16 +1,18 @@
 """
 Iterate all instance folders under `instances/`, take the 10 smallest files as described
-and solve them with both CP and MILP models. Save results to tests/test_results/<folder>.json
+and solve them with CP, MILP (Gurobi), MILP (SCIP), and MILP (HiGHS) models.
+Save results to tests/test_results/<folder>.json
 """
 import os
 import time
 import json
 from pathlib import Path
 from utils.load_ta import parse_ta_file
-from utils. load_json import load_extended_jssp_instance
+from utils.load_json import load_extended_jssp_instance
 from models.jssp_cp import JSSPCpModel
 from models.jssp_milp import JSSPMilpModel
 from models.jssp_scip import JSSPScipModel
+from models.jssp_highs import JSSPHighsModel  
 
 
 def list_smallest_instances(folder: Path):
@@ -34,10 +36,12 @@ def solve_and_record(path: Path, results_dir: Path):
     rec = {
         'instance': str(path),
         'cp': None,
-        'milp': None
+        'milp': None,
+        'scip': None,
+        'highs': None  
     }
 
-    # CP
+    # 1. CP (Constraint Programming)
     cp_model = JSSPCpModel(data)
     t0 = time.time()
     res_cp = cp_model.optimize(time_limit_seconds=30)
@@ -46,21 +50,20 @@ def solve_and_record(path: Path, results_dir: Path):
         'status': res_cp.get('status'),
         'obj': res_cp.get('obj_val'),
         'time': t1 - t0,
-        'selected_modes': res_cp.get('solution', {}).get('selected_modes', [])
     }
 
-    # MILP (Gurobi)
-    #milp_model = JSSPMilpModel(data)
-    #t0 = time.time()
-    #res_milp = milp_model.optimize(time_limit=30)
-    #t1 = time.time()
-    #rec['milp'] = {
-    #    'status': res_milp.get('status'),
-    #    'obj': res_milp.get('obj_val'),
-    #    'time': t1 - t0,
-    #}
+    # 2. MILP (Gurobi) 
+    # milp_model = JSSPMilpModel(data)
+    # t0 = time.time()
+    # res_milp = milp_model.optimize(time_limit=30)
+    # t1 = time.time()
+    # rec['milp'] = {
+    #     'status': res_milp.get('status'),
+    #     'obj': res_milp.get('obj_val'),
+    #     'time': t1 - t0,
+    # }
 
-    # MILP (SCIP)
+    # 3. MILP (SCIP)
     scip_model = JSSPScipModel(data)
     t0 = time.time()
     res_scip = scip_model.optimize(time_limit=30)
@@ -71,7 +74,18 @@ def solve_and_record(path: Path, results_dir: Path):
         'time': t1 - t0,
     }
 
-    # write per-instance record
+    # 4. MILP (HiGHS)
+    highs_model = JSSPHighsModel(data)
+    t0 = time.time()
+    res_highs = highs_model.optimize(time_limit=30)
+    t1 = time.time()
+    rec['highs'] = {
+        'status': res_highs.get('status'),
+        'obj': res_highs.get('obj_val'),
+        'time': t1 - t0,
+    }
+
+    # Write per-instance record to JSON
     out_file = results_dir / (path.name + '.json')
     with out_file.open('w', encoding='utf-8') as f:
         json.dump(rec, f, indent=2)
@@ -86,19 +100,19 @@ def test_all_variants():
     results_root.mkdir(exist_ok=True)
 
     for folder in instances_dir.iterdir():
-        #print(f"Processing folder: {folder.name}")
         if not folder.is_dir():
-        #    print(f"Skipping {folder.name} as it is not a directory.")
             continue
+            
         selected = list_smallest_instances(folder)
         folder_results = results_root / folder.name
         folder_results.mkdir(exist_ok=True)
+        
         for path in selected:
             try:
                 rec = solve_and_record(path, folder_results)
-                print(f"Solved {path} -> cp:{rec['cp']['status']} scip:{rec['scip']['status']}")
+                print(f"Solved {path.name} -> cp:{rec['cp']['status']} scip:{rec['scip']['status']} highs:{rec['highs']['status']}")
             except Exception as e:
-                print(f"Failed {path}: {e}")
+                print(f"Failed {path.name}: {e}")
 
 
 if __name__ == '__main__':
