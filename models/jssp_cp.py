@@ -305,6 +305,24 @@ class JSSPCpModel:
             # jobs
             solution["jobs"] = {j: {"start": solver.Value(self.job_start[j]), "end": solver.Value(self.job_end[j])} for j in self.jobs}
 
-        return {"status": res_status, "obj_val": obj, "solution": solution}
+        # Make solution JSON-serializable: convert tuple keys to strings and selected_modes task identifiers
+        def _key_to_str(k):
+            if isinstance(k, tuple):
+                return "_".join(str(x) for x in k)
+            return str(k)
+
+        serial_solution = {}
+        if solution.get("tasks"):
+            serial_solution["tasks"] = { _key_to_str(t): v for t, v in solution["tasks"].items() }
+        if solution.get("selected_modes") is not None:
+            ser_sel = []
+            for entry in solution.get("selected_modes", []):
+                t, m, w = entry
+                ser_sel.append([_key_to_str(t), m, w])
+            serial_solution["selected_modes"] = ser_sel
+        if solution.get("jobs"):
+            serial_solution["jobs"] = { _key_to_str(j): v for j, v in solution["jobs"].items() }
+
+        return {"status": res_status, "obj_val": obj, "solution": serial_solution}
 
 
