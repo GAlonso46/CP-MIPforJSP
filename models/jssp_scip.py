@@ -284,7 +284,59 @@ class JSSPScipModel:
         status_str = status_map.get(status, f"STATUS_{status.upper()}")
         
         obj = None
-        if status in ("optimal", "timelimit") and self.model.getNSols() > 0:
-            obj = self.model.getObjVal()
+        solution = {}
 
-        return {"status": status_str, "scip_status": status, "obj_val": obj}
+        # Check if at least one solution is available
+        if self.model.getNSols() > 0:
+            obj = self.model.getObjVal()
+            
+            # 1. Tasks start and end times
+            tasks_sol = {}
+            for t in self.tasks:
+                start_val = self.model.getVal(self.S[t])
+                end_val = self.model.getVal(self.C[t])
+                tasks_sol[t] = {
+                    "start": int(round(start_val)),
+                    "end": int(round(end_val))
+                }
+            solution["tasks"] = tasks_sol
+            
+            # 2. Selected modes (Machine, Worker) per task
+            selected = []
+            for (t, mm, ww), var in self.x.items():
+                if self.model.getVal(var) > 0.5:
+                    selected.append((t, mm, ww))
+            solution["selected_modes"] = selected
+            
+            # 3. Job windows (start of first task, end of last task)
+            jobs_sol = {}
+            for j, t_list in self.job_tasks.items():
+                j_start = min(tasks_sol[t]["start"] for t in t_list)
+                j_end = max(tasks_sol[t]["end"] for t in t_list)
+                jobs_sol[j] = {"start": j_start, "end": j_end}
+            solution["jobs"] = jobs_sol
+
+        # Make solution JSON-serializable: convert tuple keys to strings and selected modes
+        def _key_to_str(k):
+            if isinstance(k, tuple):
+                return "_".join(str(x) for x in k)
+            return str(k)
+
+        serial_solution = {}
+        if solution.get("tasks"):
+            serial_solution["tasks"] = { _key_to_str(t): v for t, v in solution["tasks"].items() }
+        if solution.get("selected_modes") is not None:
+            ser_sel = []
+            for entry in solution.get("selected_modes", []):
+                t, mm, ww = entry
+                ser_sel.append([_key_to_str(t), mm, ww])
+            serial_solution["selected_modes"] = ser_sel
+        if solution.get("jobs"):
+            serial_solution["jobs"] = { _key_to_str(j): v for j, v in solution["jobs"].items() }
+
+        return {
+            "status": status_str, 
+            "scip_status": status,
+            "obj_val": obj, 
+            "solution": serial_solution
+        }
