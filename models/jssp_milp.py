@@ -295,6 +295,9 @@ class JSSPMilpModel:
         m.update()
 
     def optimize(self, time_limit: float = None):
+        """
+        Runs the Gurobi solver and returns a dictionary with the results.
+        """
         if time_limit is not None:
             try:
                 self.model.setParam(GRB.Param.TimeLimit, float(time_limit))
@@ -302,6 +305,8 @@ class JSSPMilpModel:
                 pass
 
         self.model.optimize()
+        
+        # Mapping Gurobi status codes to consistent string naming
         status = self.model.status
         status_map = {
             GRB.OPTIMAL: "OPTIMAL",
@@ -312,11 +317,66 @@ class JSSPMilpModel:
             GRB.CUTOFF: "CUTOFF",
         }
         status_str = status_map.get(status, f"STATUS_{status}")
+        
         obj = None
-        if status in (GRB.OPTIMAL, GRB.TIME_LIMIT, GRB.CUTOFF):
+        solution = {}
+
+        # Check if Gurobi found at least one feasible solution
+        if self.model.SolCount > 0:
             try:
                 obj = self.model.objVal
+                
+                # 1. Extract task start and end times (rounded for precision)
+                tasks_sol = {}
+                for t in self.tasks:
+                    tasks_sol[t] = {
+                        "start": int(round(self.S[t].X)),
+                        "end": int(round(self.C[t].X))
+                    }
+                solution["tasks"] = tasks_sol
+                
+                # 2. Extract selected operation modes (Machine, Worker) per task
+                selected = []
+                for (t, mm, ww), var in self.x.items():
+                    # If binary variable is active (True)
+                    if var.X > 0.5:
+                        selected.append((t, mm, ww))
+                solution["selected_modes"] = selected
+                
+                # 3. Calculate job windows (first task start, last task end)
+                jobs_sol = {}
+                for j, t_list in self.job_tasks.items():
+                    # Job starts when its first task starts and ends with its last task
+                    j_start = min(tasks_sol[t]["start"] for t in t_list)
+                    j_end = max(tasks_sol[t]["end"] for t in t_list)
+                    jobs_sol[j] = {"start": j_start, "end": j_end}
+                solution["jobs"] = jobs_sol
+                
             except Exception:
+                # In case of numeric issues during attribute access
                 obj = None
+                solution = {}
+        def _key_to_str(k):
+            if isinstance(k, tuple):
+                return "_".join(str(x) for x in k)
+            return str(k)
 
-        return {"status": status_str, "gurobi_status": status, "obj_val": obj}
+        serial_solution = {}
+        if solution.get("tasks"):
+            serial_solution["tasks"] = { _key_to_str(t): v for t, v in solution["tasks"].items() }
+        if solution.get("selected_modes") is not None:
+            ser_sel = []
+            for entry in solution.get("selected_modes", []):
+                t, m, w = entry
+                ser_sel.append([_key_to_str(t), m, w])
+            serial_solution["selected_modes"] = ser_sel
+        if solution.get("jobs"):
+            serial_solution["jobs"] = { _key_to_str(j): v for j, v in solution["jobs"].items() }
+    
+
+        return {
+            "status": status_str, 
+            "gurobi_status": status, 
+            "obj_val": obj, 
+            "solution": serial_solution
+        }
