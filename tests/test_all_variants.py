@@ -50,6 +50,7 @@ def solve_and_record(path: Path, results_dir: Path):
         'status': res_cp.get('status'),
         'obj': res_cp.get('obj_val'),
         'time': t1 - t0,
+        'solution': res_cp.get('solution', {})
     }
 
     # 2. MILP (Gurobi) 
@@ -72,18 +73,19 @@ def solve_and_record(path: Path, results_dir: Path):
         'status': res_scip.get('status'),
         'obj': res_scip.get('obj_val'),
         'time': t1 - t0,
+        'solution': res_scip.get('solution', {})
     }
 
     # 4. MILP (HiGHS)
-    highs_model = JSSPHighsModel(data)
-    t0 = time.time()
-    res_highs = highs_model.optimize(time_limit=30)
-    t1 = time.time()
-    rec['highs'] = {
-        'status': res_highs.get('status'),
-        'obj': res_highs.get('obj_val'),
-        'time': t1 - t0,
-    }
+    #highs_model = JSSPHighsModel(data)
+    #t0 = time.time()
+    #res_highs = highs_model.optimize(time_limit=30)
+    #t1 = time.time()
+    #rec['highs'] = {
+    #    'status': res_highs.get('status'),
+    #    'obj': res_highs.get('obj_val'),
+    #    'time': t1 - t0,
+    #}
 
     # Write per-instance record to JSON
     out_file = results_dir / (path.name + '.json')
@@ -110,7 +112,7 @@ def test_all_variants():
         for path in selected:
             try:
                 rec = solve_and_record(path, folder_results)
-                print(f"Solved {path.name} -> cp:{rec['cp']['status']} scip:{rec['scip']['status']} highs:{rec['highs']['status']}")
+                print(f"Solved {path.name} -> cp:{rec['cp']['status']} scip:{rec['scip']['status']}")
             except Exception as e:
                 print(f"Failed {path.name}: {e}")
 
