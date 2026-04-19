@@ -192,13 +192,23 @@ class JSSPCpModel:
             lag = self.L.get((i, k), 0)
             model.Add(self.task_start[k] >= self.task_end[i] + lag)
 
-        # 4. Job Windows
+        # 4. Job Windows: Strict bounding using Min/Max constraints
         for j, tlist in self.job_tasks.items():
             rj = self.r.get(j, 0)
             dj = self.d.get(j, self.horizon)
-            for t in tlist:
-                model.Add(self.job_start[j] <= self.task_start[t])
-                model.Add(self.job_end[j] >= self.task_end[t])
+            
+            # Extract start and end variables for tasks belonging to job j
+            job_task_starts = [self.task_start[t] for t in tlist]
+            job_task_ends = [self.task_end[t] for t in tlist]
+            
+            # Enforce that the job start is exactly the minimum of its tasks' starts
+            model.AddMinEquality(self.job_start[j], job_task_starts)
+            
+            # Enforce that the job end is exactly the maximum of its tasks' ends
+            model.AddMaxEquality(self.job_end[j], job_task_ends)
+            
+            # Apply temporal constraints: release dates and deadlines
+            # These provide the lower bound for the start and upper bound for the end
             model.Add(self.job_start[j] >= rj)
             model.Add(self.job_end[j] <= dj)
 
@@ -258,10 +268,10 @@ class JSSPCpModel:
                             model.AddImplication(b, self.mode_pres[mode_v])
             model.AddCircuit(arcs)
 
-        # 7. Objective: C_max >= End(I_j) for all j; minimize C_max
+        # 7. Objective: Minimize the makespan (C_max)
         self.C_max = model.NewIntVar(0, self.horizon, "C_max")
-        for j in self.jobs:
-            model.Add(self.C_max >= self.job_end[j])
+        # Direct functional link between C_max and all job completion times
+        model.AddMaxEquality(self.C_max, list(self.job_end.values()))
         model.Minimize(self.C_max)
 
     def optimize(self, time_limit_seconds: int = None):
