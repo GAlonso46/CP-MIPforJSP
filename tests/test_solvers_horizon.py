@@ -74,9 +74,9 @@ def _print_scip_solution(model_obj, res):
 
 
 def test_solve_ta():
-    """Load instances/basic_jssp/small30 and solve with CP and MILP, printing results."""
+    """Load instances/basic_jssp/la10 and solve with CP and MILP, printing results."""
     base = os.path.dirname(os.path.dirname(__file__))
-    ta_path = os.path.join(base, "instances", "basic_jssp", "small30")
+    ta_path = os.path.join(base, "instances", "basic_jssp", "la10")
     print(f"Loading TA instance: {ta_path}")
     data = parse_ta_file(ta_path)
 
@@ -122,25 +122,25 @@ def test_solve_ta():
     _print_cp_solution(res_cp)
 
     # Solve with MILP (Gurobi)
-    #milp_model = JSSPMilpModel(data)
-    #t0 = time.time()
-    #res_milp = milp_model.optimize(time_limit=1800)
-    #t1 = time.time()
-    #print(f"MILP solve time: {t1 - t0:.3f} s")
-    #_print_milp_solution(milp_model, res_milp)
+    milp_model = JSSPMilpModel(data)
+    t0 = time.time()
+    res_milp = milp_model.optimize(time_limit=600)
+    t1 = time.time()
+    print(f"MILP solve time: {t1 - t0:.3f} s")
+    _print_milp_solution(milp_model, res_milp)
 
-    # 3. Solve with MILP (SCIP)
-    print("\n--- Solving with MILP (SCIP) ---")
-    try:
+    # Solve with MILP (SCIP)
+    #print("\n--- Solving with MILP (SCIP) ---")
+    #try:
         # Pass SCIP specific parameters if needed via scip_params
-        scip_model = JSSPScipModel(data, scip_params={})
-        t0 = time.time()
-        res_scip = scip_model.optimize(time_limit=1800)
-        t1 = time.time()
-        print(f"SCIP solve time: {t1 - t0:.3f} s")
-        _print_scip_solution(scip_model, res_scip)
-    except Exception as e:
-        print(f"SCIP error: {e}")
+    #    scip_model = JSSPScipModel(data, scip_params={})
+    #    t0 = time.time()
+    #    res_scip = scip_model.optimize(time_limit=1800)
+    #    t1 = time.time()
+    #    print(f"SCIP solve time: {t1 - t0:.3f} s")
+    #    _print_scip_solution(scip_model, res_scip)
+    #except Exception as e:
+    #    print(f"SCIP error: {e}")
 
 
 if __name__ == '__main__':

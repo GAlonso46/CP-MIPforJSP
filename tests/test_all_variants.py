@@ -54,27 +54,28 @@ def solve_and_record(path: Path, results_dir: Path):
     }
 
     # 2. MILP (Gurobi) 
-    # milp_model = JSSPMilpModel(data)
-    # t0 = time.time()
-    # res_milp = milp_model.optimize(time_limit=30)
-    # t1 = time.time()
-    # rec['milp'] = {
-    #     'status': res_milp.get('status'),
-    #     'obj': res_milp.get('obj_val'),
-    #     'time': t1 - t0,
-    # }
+    milp_model = JSSPMilpModel(data)
+    t0 = time.time()
+    res_milp = milp_model.optimize(time_limit=30)
+    t1 = time.time()
+    rec['milp'] = {
+        'status': res_milp.get('status'),
+        'obj': res_milp.get('obj_val'),
+        'time': t1 - t0,
+        'solution': res_milp.get('solution')
+    }
 
     # 3. MILP (SCIP)
-    scip_model = JSSPScipModel(data)
-    t0 = time.time()
-    res_scip = scip_model.optimize(time_limit=30)
-    t1 = time.time()
-    rec['scip'] = {
-        'status': res_scip.get('status'),
-        'obj': res_scip.get('obj_val'),
-        'time': t1 - t0,
-        'solution': res_scip.get('solution', {})
-    }
+    #scip_model = JSSPScipModel(data)
+    #t0 = time.time()
+    #res_scip = scip_model.optimize(time_limit=30)
+    #t1 = time.time()
+    #rec['scip'] = {
+    #    'status': res_scip.get('status'),
+    #    'obj': res_scip.get('obj_val'),
+    #    'time': t1 - t0,
+    #    'solution': res_scip.get('solution', {})
+    #}
 
     # 4. MILP (HiGHS)
     #highs_model = JSSPHighsModel(data)
@@ -112,7 +113,7 @@ def test_all_variants():
         for path in selected:
             try:
                 rec = solve_and_record(path, folder_results)
-                print(f"Solved {path.name} -> cp:{rec['cp']['status']} scip:{rec['scip']['status']}")
+                print(f"Solved {path.name} -> cp:{rec['cp']['status']} milp:{rec['milp']['status']}")
             except Exception as e:
                 print(f"Failed {path.name}: {e}")
 
