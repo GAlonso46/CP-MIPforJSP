@@ -190,45 +190,80 @@ class JSSPMilpModel:
                 if dj != float('inf'):
                     m.addConstr(self.C[t] <= dj, name=f"deadline_{j}_{t}")
 
-        # 5. Machine Sequence Consistency
-        for i in self.tasks:
-            for k in self.tasks:
-                if i == k:
-                    continue
+        # If not SDST constraints, standard y_ik definition
+        if not self.s:
+
+            # 5. Machine Sequence Consistency
+            for i in self.tasks:
+                for k in self.tasks:
+                    if i == k:
+                        continue
+                    for mm in self.machines:
+                        # workers for task i that use machine mm
+                        if has_workers:
+                            wi = [ww for (m, ww) in self.OM_t.get(i, []) if m == mm and (i, m, ww) in self.x]
+                            wk = [ww for (m, ww) in self.OM_t.get(k, []) if m == mm and (k, m, ww) in self.x]
+
+                            sum_xi = gp.quicksum(self.x[(i, mm, ww)] for ww in wi) if wi else 0
+                            sum_xk = gp.quicksum(self.x[(k, mm, ww)] for ww in wk) if wk else 0
+                        else:
+                            # no workers: x keys use ww=None
+                            sum_xi = self.x[(i, mm, None)] if (i, mm, None) in self.x else 0
+                            sum_xk = self.x[(k, mm, None)] if (k, mm, None) in self.x else 0
+
+                        if has_workers and wi:
+                            m.addConstr(self.y[(i, k, mm)] <= sum_xi, name=f"y_le_xi_{i}_{k}_{mm}")
+                        elif not has_workers:
+                            # when no workers exist, y is tied to x presence on machine mm
+                            m.addConstr(self.y[(i, k, mm)] <= sum_xi, name=f"y_le_xi_{i}_{k}_{mm}")
+                        else:
+                            m.addConstr(self.y[(i, k, mm)] <= 0, name=f"y_zero_i_{i}_{k}_{mm}")
+
+                        if has_workers and wk:
+                            m.addConstr(self.y[(i, k, mm)] <= sum_xk, name=f"y_le_xk_{i}_{k}_{mm}")
+                        elif not has_workers:
+                            m.addConstr(self.y[(i, k, mm)] <= sum_xk, name=f"y_le_xk_{i}_{k}_{mm}")
+                        else:
+                            m.addConstr(self.y[(i, k, mm)] <= 0, name=f"y_zero_k_{i}_{k}_{mm}")
+
+                        m.addConstr(self.y[(i, k, mm)] + self.y[(k, i, mm)] <= 1, name=f"y_antisym_{i}_{k}_{mm}")
+
+                        m.addConstr(
+                            self.y[(i, k, mm)] + self.y[(k, i, mm)] >= sum_xi + sum_xk - 1,
+                            name=f"y_force_{i}_{k}_{mm}"
+                        )
+        # If SDST constraints are present y_ik vars represent direct sequencing
+        else:
+            # --- Helper Expressions for Routing Formulation ---
+            # X_tm[t, m] = 1 if task t is assigned to machine m
+            X_tm = {}
+            for t in self.tasks:
                 for mm in self.machines:
-                    # workers for task i that use machine mm
                     if has_workers:
-                        wi = [ww for (m, ww) in self.OM_t.get(i, []) if m == mm and (i, m, ww) in self.x]
-                        wk = [ww for (m, ww) in self.OM_t.get(k, []) if m == mm and (k, m, ww) in self.x]
-
-                        sum_xi = gp.quicksum(self.x[(i, mm, ww)] for ww in wi) if wi else 0
-                        sum_xk = gp.quicksum(self.x[(k, mm, ww)] for ww in wk) if wk else 0
+                        valid_w = [ww for (m, ww) in self.OM_t.get(t, []) if m == mm]
+                        X_tm[(t, mm)] = gp.quicksum(self.x[(t, mm, ww)] for ww in valid_w) if valid_w else 0
                     else:
-                        # no workers: x keys use ww=None
-                        sum_xi = self.x[(i, mm, None)] if (i, mm, None) in self.x else 0
-                        sum_xk = self.x[(k, mm, None)] if (k, mm, None) in self.x else 0
+                        X_tm[(t, mm)] = self.x[(t, mm, None)] if (t, mm, None) in self.x else 0
+                        
+            # 5. Machine Sequence Consistency (Routing Formulation)
+            for mm in self.machines:
+                # Path forcing: total connections >= assigned tasks - 1
+                sum_y = gp.quicksum(self.y[(i, k, mm)] for i in self.tasks for k in self.tasks if i != k)
+                sum_X = gp.quicksum(X_tm[(t, mm)] for t in self.tasks)
+                m.addConstr(sum_y >= sum_X - 1, name=f"path_forcing_m_{mm}")
 
-                    if has_workers and wi:
-                        m.addConstr(self.y[(i, k, mm)] <= sum_xi, name=f"y_le_xi_{i}_{k}_{mm}")
-                    elif not has_workers:
-                        # when no workers exist, y is tied to x presence on machine mm
-                        m.addConstr(self.y[(i, k, mm)] <= sum_xi, name=f"y_le_xi_{i}_{k}_{mm}")
-                    else:
-                        m.addConstr(self.y[(i, k, mm)] <= 0, name=f"y_zero_i_{i}_{k}_{mm}")
+                for i in self.tasks:
+                    # Out-degree <= 1
+                    m.addConstr(gp.quicksum(self.y[(i, k, mm)] for k in self.tasks if i != k) <= X_tm[(i, mm)], name=f"out_degree_{i}_{mm}")
+                    
+                    # In-degree <= 1
+                    m.addConstr(gp.quicksum(self.y[(k, i, mm)] for k in self.tasks if i != k) <= X_tm[(i, mm)], name=f"in_degree_{i}_{mm}")
 
-                    if has_workers and wk:
-                        m.addConstr(self.y[(i, k, mm)] <= sum_xk, name=f"y_le_xk_{i}_{k}_{mm}")
-                    elif not has_workers:
-                        m.addConstr(self.y[(i, k, mm)] <= sum_xk, name=f"y_le_xk_{i}_{k}_{mm}")
-                    else:
-                        m.addConstr(self.y[(i, k, mm)] <= 0, name=f"y_zero_k_{i}_{k}_{mm}")
+                    for k in self.tasks:
+                        if i != k:
+                            # Antisymmetry
+                            m.addConstr(self.y[(i, k, mm)] + self.y[(k, i, mm)] <= 1, name=f"antisym_{i}_{k}_{mm}")
 
-                    m.addConstr(self.y[(i, k, mm)] + self.y[(k, i, mm)] <= 1, name=f"y_antisym_{i}_{k}_{mm}")
-
-                    m.addConstr(
-                        self.y[(i, k, mm)] + self.y[(k, i, mm)] >= sum_xi + sum_xk - 1,
-                        name=f"y_force_{i}_{k}_{mm}"
-                    )
 
         # 6. Machine Disjunction with SDST
         for i in self.tasks:
@@ -238,11 +273,11 @@ class JSSPMilpModel:
                 for mm in self.machines:
                     y_ikm = self.y[(i, k, mm)]
                     s_ikm = self.s.get((i, k, mm), 0)
-                    m.addConstr(self.S[k] >= self.C[i] + s_ikm * y_ikm - self.V * (1 - y_ikm), name=f"sdst1_{i}_{k}_{mm}")
+                    m.addConstr(self.S[k] >= self.C[i] + s_ikm - self.V * (1 - y_ikm), name=f"sdst1_{i}_{k}_{mm}")
 
                     y_kim = self.y[(k, i, mm)]
                     s_kim = self.s.get((k, i, mm), 0)
-                    m.addConstr(self.S[i] >= self.C[k] + s_kim * y_kim - self.V * (1 - y_kim), name=f"sdst2_{i}_{k}_{mm}")
+                    m.addConstr(self.S[i] >= self.C[k] + s_kim - self.V * (1 - y_kim), name=f"sdst2_{i}_{k}_{mm}")
 
         # 7. Worker Sequence Consistency
         if has_workers:
