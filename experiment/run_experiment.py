@@ -28,9 +28,9 @@ from models.jssp_milp import JSSPMilpModel
 
 
 # Default number of repetitions per solver
-REPEATS = 3
+REPEATS = 5
 # Default time limit (seconds) per optimization call
-TIME_LIMIT = 30
+TIME_LIMIT = 600
 
 
 def _extract_trailing_number(fname: str) -> Optional[int]:
