@@ -32,6 +32,35 @@ REPEATS = 5
 # Default time limit (seconds) per optimization call
 TIME_LIMIT = 600
 
+# List of specific instance filenames to run (define names exactly as in files or stems).
+# Examples: ['small01', 'la01', 'd_jssp001.json', 'ta05']
+SPECIFIC_INSTANCES: List[str] = []
+
+
+def find_instance_file(instances_dir: Path, target_name: str) -> Optional[Path]:
+    """Search all instance subfolders for a file matching `target_name`.
+
+    Matching rules (in order): exact filename, stem (without extension), startswith,
+    endswith, or substring. Returns first match found or None.
+    """
+    for folder in instances_dir.iterdir():
+        if not folder.is_dir():
+            continue
+        for f in folder.iterdir():
+            if not f.is_file():
+                continue
+            name = f.name
+            stem = f.stem
+            if (
+                name == target_name
+                or stem == target_name
+                or name.startswith(target_name)
+                or name.endswith(target_name)
+                or target_name in name
+            ):
+                return f
+    return None
+
 
 def _extract_trailing_number(fname: str) -> Optional[int]:
     """Return trailing three-digit number from filename like '...001.json' or None."""
@@ -210,6 +239,51 @@ def run(group: str = 'all', repeats: int = REPEATS, time_limit: int = TIME_LIMIT
     instances_dir = base / 'instances'
     results_root = Path(__file__).parent / 'results'
     results_root.mkdir(parents=True, exist_ok=True)
+
+    # If SPECIFIC_INSTANCES is provided, process only those files (ignore `group`).
+    if SPECIFIC_INSTANCES:
+        print(f"Running SPECIFIC_INSTANCES list with {len(SPECIFIC_INSTANCES)} entries")
+        for target in SPECIFIC_INSTANCES:
+            found = find_instance_file(instances_dir, target)
+            if not found:
+                print(f"Warning: specific instance '{target}' not found in instances/")
+                continue
+
+            folder_results = results_root / found.parent.name
+            folder_results.mkdir(parents=True, exist_ok=True)
+
+            try:
+                data = _load_instance(found)
+
+                rec = {
+                    'instance': str(found),
+                    'repeats': repeats,
+                    'cp': None,
+                    'milp': None,
+                }
+
+                cp_record = solve_instance_repeatedly(data, 'cp', repeats, time_limit)
+                rec['cp'] = {
+                    'reps': cp_record['reps'],
+                    'solution': cp_record['solution'] or {},
+                }
+
+                milp_record = solve_instance_repeatedly(data, 'milp', repeats, time_limit)
+                rec['milp'] = {
+                    'reps': milp_record['reps'],
+                    'solution': milp_record['solution'] or None,
+                }
+
+                out_file = folder_results / (found.name + '.json')
+                with out_file.open('w', encoding='utf-8') as f:
+                    json.dump(rec, f, indent=2)
+
+                print(f"Solved {found} -> cp:{rec['cp']['reps'][-1]['status']} milp:{rec['milp']['reps'][-1]['status']}")
+
+            except Exception as e:
+                print(f"Failed {found}: {e}")
+
+        return
 
     if group not in ('small', 'mid', 'large', 'all'):
         raise ValueError("group must be one of: small, mid, large, all")
