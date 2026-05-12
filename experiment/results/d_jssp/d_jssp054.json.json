@@ -1,0 +1,44 @@
+{
+  "instance": "/home/rc46/Escritorio/Proyects/CP-MIPforJSP/instances/d_jssp/d_jssp054.json",
+  "repeats": 3,
+  "cp": {
+    "reps": [
+      {
+        "status": "INFEASIBLE",
+        "obj": null,
+        "time": 2.6475064754486084
+      },
+      {
+        "status": "INFEASIBLE",
+        "obj": null,
+        "time": 2.425762891769409
+      },
+      {
+        "status": "INFEASIBLE",
+        "obj": null,
+        "time": 2.309659957885742
+      }
+    ],
+    "solution": {}
+  },
+  "milp": {
+    "reps": [
+      {
+        "status": "INFEASIBLE",
+        "obj": null,
+        "time": 19.227441549301147
+      },
+      {
+        "status": "INFEASIBLE",
+        "obj": null,
+        "time": 19.767719745635986
+      },
+      {
+        "status": "INFEASIBLE",
+        "obj": null,
+        "time": 19.591565132141113
+      }
+    ],
+    "solution": null
+  }
+}
