@@ -1,7 +1,7 @@
 """
 Run a set of experiments over the instances in `instances/`.
 
-This script is similar to `tests/test_all_variants.py` but:
+This script:
 - Solves each instance with CP and MILP (Gurobi) models.
 - Groups instances by size (small, mid, large) with three helper functions.
 - Supports multiple consecutive repetitions per solver and records status/obj/time for
@@ -10,8 +10,6 @@ This script is similar to `tests/test_all_variants.py` but:
 
 Usage (optional):
     python experiment/run_experiment.py [--group small|mid|large|all] [--repeats N]
-
-All docstrings and comments are in English.
 """
 
 import argparse
