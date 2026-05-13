@@ -104,6 +104,10 @@ def load_all_results(results_root: Path) -> pd.DataFrame:
             instance_stem = Path(instance_name).stem
             size = _detect_size_from_name(instance_stem)
 
+            # preserve the original instance path string when available so downstream code can
+            # resolve the instance file; fall back to the actual result file path
+            instance_path_val = data.get('instance', str(file))
+
             for solver in ('cp', 'milp'):
                 solver_obj = data.get(solver)
                 if not solver_obj:
@@ -112,6 +116,7 @@ def load_all_results(results_root: Path) -> pd.DataFrame:
                         'variant': variant_dir.name,
                         'instance_name': instance_stem,
                         'file_path': str(file),
+                        'instance_path': instance_path_val,
                         'size': size,
                         'solver': solver,
                         'rep_times': [],
@@ -144,6 +149,7 @@ def load_all_results(results_root: Path) -> pd.DataFrame:
                     'variant': variant_dir.name,
                     'instance_name': instance_stem,
                     'file_path': str(file),
+                    'instance_path': instance_path_val,
                     'size': size,
                     'solver': solver,
                     'rep_times': times,
@@ -157,6 +163,13 @@ def load_all_results(results_root: Path) -> pd.DataFrame:
                 })
 
     df = pd.DataFrame.from_records(records)
+
+    # Ensure numeric columns are numeric: some records can contain strings (from malformed JSON
+    # or inconsistent typing). Coerce to numeric and replace non-convertible entries with NaN.
+    for col in ('median_time', 'std_time', 'median_obj', 'std_obj'):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
     return df
 
 
@@ -175,21 +188,22 @@ def aggregate_tables(df: pd.DataFrame, tables_dir: Path) -> Tuple[Path, Path]:
         raise ValueError(f"DataFrame missing required columns: {missing}")
 
     # SUMMARY TABLE grouped by Variant and Size
-    # For both solvers compute average of median_time and median_obj and % OPTIMAL
-    def compute_summary(group):
-        rows = {}
-        total_instances = group['instance_name'].nunique()
-        for solver in ('cp', 'milp'):
-            g = group[group['solver'] == solver]
-            avg_median_time = g['median_time'].replace([np.inf, -np.inf], np.nan).mean()
-            avg_median_obj = g['median_obj'].replace([np.inf, -np.inf], np.nan).mean()
-            pct_optimal = (g['most_freq_status'] == 'OPTIMAL').sum() / max(1, g['instance_name'].nunique()) * 100
-            rows[f'{solver}_avg_median_time'] = avg_median_time
-            rows[f'{solver}_avg_median_obj'] = avg_median_obj
-            rows[f'{solver}_pct_optimal'] = pct_optimal
-        return pd.Series(rows)
+    # Compute per (variant,size,solver) aggregated metrics, then pivot solvers into columns.
+    grouped = df.groupby(['variant', 'size', 'solver']).agg(
+        avg_median_time=('median_time', lambda x: pd.to_numeric(x, errors='coerce').replace([np.inf, -np.inf], np.nan).mean()),
+        avg_median_obj=('median_obj', lambda x: pd.to_numeric(x, errors='coerce').replace([np.inf, -np.inf], np.nan).mean()),
+        n_instances=('instance_name', 'nunique'),
+        n_optimal=('most_freq_status', lambda x: (x == 'OPTIMAL').sum()),
+    ).reset_index()
 
-    summary = df.groupby(['variant', 'size']).apply(compute_summary).reset_index()
+    grouped['pct_optimal'] = grouped.apply(lambda r: (r['n_optimal'] / r['n_instances'] * 100) if r['n_instances'] > 0 else np.nan, axis=1)
+
+    # Now pivot metrics so columns are like cp_avg_median_time, milp_avg_median_time, etc.
+    time_pivot = grouped.pivot(index=['variant', 'size'], columns='solver', values='avg_median_time').rename(columns=lambda s: f"{s}_avg_median_time")
+    obj_pivot = grouped.pivot(index=['variant', 'size'], columns='solver', values='avg_median_obj').rename(columns=lambda s: f"{s}_avg_median_obj")
+    pct_pivot = grouped.pivot(index=['variant', 'size'], columns='solver', values='pct_optimal').rename(columns=lambda s: f"{s}_pct_optimal")
+
+    summary = pd.concat([time_pivot, obj_pivot, pct_pivot], axis=1).reset_index()
     summary_file = tables_dir / 'summary_table.csv'
     summary.to_csv(summary_file, index=False)
 
@@ -244,7 +258,13 @@ def generate_graphics(df: pd.DataFrame, graphics_dir: Path) -> Tuple[Path, Path,
         for t in row['rep_times']:
             if t is None:
                 continue
-            times_records.append({'variant': row['variant'], 'solver': row['solver'], 'time': float(t)})
+            # be defensive: some time values might be strings or non-numeric; try to coerce
+            try:
+                time_val = float(t)
+            except Exception:
+                # skip non-numeric time entries
+                continue
+            times_records.append({'variant': row['variant'], 'solver': row['solver'], 'time': time_val})
     times_df = pd.DataFrame.from_records(times_records)
 
     # BOXPLOT: computation times CP vs MILP across variants
@@ -301,11 +321,41 @@ def generate_graphics(df: pd.DataFrame, graphics_dir: Path) -> Tuple[Path, Path,
     plt.close()
 
     # MAKESPAN SCATTER: median objective CP (X) vs MILP (Y) for instances that have FEASIBLE as most frequent status
-    # Build a table with one row per instance containing cp and milp median_obj and most_freq_status
-    inst_pivot = df.pivot_table(index=['variant', 'instance_name', 'size', 'file_path'], columns='solver', values=['median_obj', 'most_freq_status'])
-    # flatten columns
-    inst_pivot.columns = [f'{col[1]}_{col[0]}' for col in inst_pivot.columns]
-    inst_pivot = inst_pivot.reset_index()
+    # Pivot numeric and categorical columns separately to avoid pandas trying to aggregate object dtypes with numeric funcs.
+    median_obj_pivot = df.pivot_table(
+        index=['variant', 'instance_name', 'size', 'file_path'],
+        columns='solver',
+        values='median_obj',
+        aggfunc='first'
+    )
+
+    def top_mode(x):
+        x = x.dropna()
+        if x.empty:
+            return np.nan
+        modes = x.mode()
+        return modes.iloc[0] if not modes.empty else x.iloc[0]
+
+    status_pivot = df.pivot_table(
+        index=['variant', 'instance_name', 'size', 'file_path'],
+        columns='solver',
+        values='most_freq_status',
+        aggfunc=top_mode
+    )
+
+    # Normalize column names: ensure columns become 'cp_median_obj', 'milp_median_obj',
+    # and 'cp_most_freq_status', 'milp_most_freq_status'. Handle both single- and multi-indexed columns.
+    if isinstance(median_obj_pivot.columns, pd.MultiIndex):
+        median_obj_pivot.columns = [f"{col[1]}_median_obj" for col in median_obj_pivot.columns]
+    else:
+        median_obj_pivot = median_obj_pivot.rename(columns=lambda s: f"{s}_median_obj")
+
+    if isinstance(status_pivot.columns, pd.MultiIndex):
+        status_pivot.columns = [f"{col[1]}_most_freq_status" for col in status_pivot.columns]
+    else:
+        status_pivot = status_pivot.rename(columns=lambda s: f"{s}_most_freq_status")
+
+    inst_pivot = pd.concat([median_obj_pivot, status_pivot], axis=1).reset_index()
 
     # select instances where either solver reached FEASIBLE or TIME_LIMIT (treat TIME_LIMIT as FEASIBLE if desired)
     def is_time_limited(s):
@@ -340,6 +390,312 @@ def generate_graphics(df: pd.DataFrame, graphics_dir: Path) -> Tuple[Path, Path,
     return boxplot_file, status_file, makespan_file
 
 
+def _resolve_instance_file(instance_path: str, instances_root: Path) -> Path:
+    """Resolve instance file path. If instance_path exists return it, otherwise search under instances_root."""
+    p = Path(instance_path)
+    if p.exists():
+        return p
+    # try relative to instances_root
+    cand = instances_root / p.name
+    if cand.exists():
+        return cand
+    # search by stem
+    stem = p.stem
+    matches = list(instances_root.rglob(stem + '*'))
+    return matches[0] if matches else None
+
+
+def get_instance_dimensions(instance_path: str, instances_root: Path) -> Tuple[int, int, int]:
+    """Return (num_jobs, num_machines, num_workers) inferred from the instance file.
+
+    Handles JSON instances (reads fields or job_tasks/machines) and TA-like plain text files
+    where the first non-comment line contains 'jobs machines'.
+    """
+    inst_file = _resolve_instance_file(instance_path, instances_root)
+    if not inst_file:
+        return (None, None, None)
+    try:
+        if inst_file.suffix == '.json':
+            with inst_file.open('r', encoding='utf-8') as f:
+                data = json.load(f)
+            num_jobs = data.get('num_jobs') if data.get('num_jobs') is not None else (len(data.get('job_tasks', {})) if isinstance(data.get('job_tasks', {}), dict) else None)
+            num_machines = data.get('num_machines') if data.get('num_machines') is not None else (len(data.get('machines', [])) if isinstance(data.get('machines', []), list) else None)
+            num_workers = data.get('num_workers') if data.get('num_workers') is not None else (len(data.get('workers', [])) if isinstance(data.get('workers', []), list) else 0)
+            return (num_jobs, num_machines, num_workers)
+        else:
+            with inst_file.open('r', encoding='utf-8') as f:
+                for ln in f:
+                    line = ln.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    parts = re.split(r"\s+", line)
+                    if len(parts) >= 2:
+                        try:
+                            j = int(parts[0])
+                            m = int(parts[1])
+                            return (j, m, 0)
+                        except Exception:
+                            break
+            return (None, None, None)
+    except Exception:
+        return (None, None, None)
+
+
+def build_master_dataframe(results_root: Path, instances_root: Path) -> pd.DataFrame:
+    """Build master DataFrame including instance dimensions and per-solver repetition lists.
+
+    Returns DataFrame similar to load_all_results but with columns J, M, num_workers, Total_Tasks and
+    per-record summary statistics (time mean/median/std, obj mean/median/std, counts).
+    """
+    df = load_all_results(results_root)
+
+    # add dimension columns (coerce None -> np.nan so grouping/means behave)
+    Js = []
+    Ms = []
+    Ws = []
+    for ip in df.get('instance_path', pd.Series(dtype=str)).fillna(''):
+        j, m, w = get_instance_dimensions(ip, instances_root)
+        Js.append(np.nan if j is None else j)
+        Ms.append(np.nan if m is None else m)
+        Ws.append(np.nan if w is None else w)
+    df['J'] = Js
+    df['M'] = Ms
+    df['num_workers'] = Ws
+
+    # ensure numeric dtypes
+    df['J'] = pd.to_numeric(df['J'], errors='coerce')
+    df['M'] = pd.to_numeric(df['M'], errors='coerce')
+    df['num_workers'] = pd.to_numeric(df['num_workers'], errors='coerce')
+
+    # compute Total_Tasks as numeric (NaN when missing)
+    # vectorized multiplication for performance and correctness
+    df['Total_Tasks'] = df['J'] * df['M']
+
+    # Per-record aggregation from rep lists
+    metrics = []
+    for _, row in df.iterrows():
+        times = pd.to_numeric(pd.Series(row.get('rep_times', [])), errors='coerce')
+        objs = pd.to_numeric(pd.Series(row.get('rep_objs', [])), errors='coerce')
+        statuses = pd.Series(row.get('rep_statuses', []))
+        count_opt = int((statuses == 'OPTIMAL').sum()) if not statuses.empty else 0
+        count_feas = int((statuses == 'FEASIBLE').sum()) if not statuses.empty else 0
+        reps_count = int(len(row.get('rep_times', []))) if row.get('rep_times') else 0
+
+        time_mean = float(times.mean()) if not times.dropna().empty else np.nan
+        time_median = float(times.median()) if not times.dropna().empty else np.nan
+        time_std = float(times.std(ddof=0)) if not times.dropna().empty else np.nan
+        obj_mean = float(objs.mean()) if not objs.dropna().empty else np.nan
+        obj_median = float(objs.median()) if not objs.dropna().empty else np.nan
+        obj_std = float(objs.std(ddof=0)) if not objs.dropna().empty else np.nan
+        optimality_rate = (count_opt / reps_count * 100) if reps_count > 0 else np.nan
+
+        metrics.append({
+            'time_mean': time_mean,
+            'time_median': time_median,
+            'time_std': time_std,
+            'obj_mean': obj_mean,
+            'obj_median': obj_median,
+            'obj_std': obj_std,
+            'count_optimal': count_opt,
+            'count_feasible': count_feas,
+            'reps_count': reps_count,
+            'optimality_rate': optimality_rate,
+        })
+
+    met_df = pd.DataFrame.from_records(metrics)
+
+    # coerce numeric columns to numeric dtype to avoid object dtypes
+    for c in ['time_mean', 'time_median', 'time_std', 'obj_mean', 'obj_median', 'obj_std', 'optimality_rate']:
+        if c in met_df.columns:
+            met_df[c] = pd.to_numeric(met_df[c], errors='coerce')
+
+    df = pd.concat([df.reset_index(drop=True), met_df], axis=1)
+
+    # Final defensive coercion: ensure all numeric-like columns are numeric to avoid pandas errors later
+    numeric_like = [c for c in df.columns if any(k in c.lower() for k in ('time', 'obj', 'total', 'j', 'm', 'num_workers', 'optimality_rate'))]
+    for c in numeric_like:
+        try:
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+        except Exception:
+            # leave as-is if coercion fails for unexpected reason
+            pass
+
+    return df
+
+
+def generate_variant_deep_dive(df: pd.DataFrame, tables_dir: Path):
+    """Create per-variant deep-dive CSV tables grouped by instance dimensions."""
+    tables_dir = Path(tables_dir)
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    for variant, group in df.groupby('variant'):
+        group = group.copy()
+        # coerce numeric columns that will be aggregated
+        num_cols = ['time_mean', 'time_median', 'time_std', 'obj_mean', 'obj_median', 'obj_std', 'Total_Tasks', 'optimality_rate']
+        for c in num_cols:
+            if c in group.columns:
+                group[c] = pd.to_numeric(group[c], errors='coerce')
+
+        group['dim'] = group.apply(lambda r: f"{int(r['J'])}x{int(r['M'])}" if pd.notna(r['J']) and pd.notna(r['M']) else 'unknown', axis=1)
+        cols = ['dim', 'instance_name', 'solver', 'time_mean', 'time_median', 'time_std', 'obj_mean', 'obj_median', 'obj_std', 'count_optimal', 'count_feasible', 'optimality_rate', 'Total_Tasks']
+        sub = group[[c for c in cols if c in group.columns]]
+
+        # do aggregation with retry on dtype issues
+        try:
+            # use std (stddev) instead of median per new requirements
+            agg = sub.groupby(['dim', 'solver']).agg(
+                instances_count=('instance_name', 'nunique'),
+                mean_time_mean=('time_mean', lambda x: pd.to_numeric(x, errors='coerce').mean()),
+                std_time=('time_median', lambda x: pd.to_numeric(x, errors='coerce').std()),
+                mean_obj_mean=('obj_mean', lambda x: pd.to_numeric(x, errors='coerce').mean()),
+                std_obj=('obj_median', lambda x: pd.to_numeric(x, errors='coerce').std()),
+                std_time_mean=('time_std', lambda x: pd.to_numeric(x, errors='coerce').mean()),
+                std_obj_mean=('obj_std', lambda x: pd.to_numeric(x, errors='coerce').mean()),
+                total_optimal_count=('count_optimal', 'sum'),
+                total_feasible_count=('count_feasible', 'sum'),
+                avg_opt_rate=('optimality_rate', lambda x: pd.to_numeric(x, errors='coerce').mean()),
+                avg_total_tasks=('Total_Tasks', lambda x: pd.to_numeric(x, errors='coerce').mean())
+            ).reset_index()
+        except Exception as e:
+            # coerce any object columns and retry
+            for c in num_cols:
+                if c in sub.columns:
+                    sub[c] = pd.to_numeric(sub[c], errors='coerce')
+            agg = sub.groupby(['dim', 'solver']).agg(
+                instances_count=('instance_name', 'nunique'),
+                mean_time_mean=('time_mean', 'mean'),
+                std_time=('time_median', 'std'),
+                std_time_mean=('time_std', 'mean'),
+                mean_obj_mean=('obj_mean', 'mean'),
+                std_obj=('obj_median', 'std'),
+                std_obj_mean=('obj_std', 'mean'),
+                total_optimal_count=('count_optimal', 'sum'),
+                total_feasible_count=('count_feasible', 'sum'),
+                avg_opt_rate=('optimality_rate', 'mean'),
+                avg_total_tasks=('Total_Tasks', 'mean')
+            ).reset_index()
+
+        # ensure numeric result columns are numeric
+        for c in ['mean_time_mean', 'std_time', 'std_time_mean', 'mean_obj_mean', 'std_obj', 'std_obj_mean', 'avg_opt_rate', 'avg_total_tasks']:
+            if c in agg.columns:
+                agg[c] = pd.to_numeric(agg[c], errors='coerce')
+
+        pivot = agg.pivot(index='dim', columns='solver')
+        # flatten columns safely
+        pivot.columns = [f"{col[1]}_{col[0]}" for col in pivot.columns]
+        out_file = Path(tables_dir) / f"variant_deep_dive_{variant}.csv"
+        pivot.to_csv(out_file)
+
+
+def generate_global_scalability(df: pd.DataFrame, tables_dir: Path):
+    tables_dir = Path(tables_dir)
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    df = df.copy()
+
+    # coerce numeric columns used in aggregations
+    for c in ['time_median', 'time_mean', 'obj_median', 'obj_mean', 'optimality_rate']:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+
+    df['dim'] = df.apply(lambda r: f"{int(r['J'])}x{int(r['M'])}" if pd.notna(r['J']) and pd.notna(r['M']) else 'unknown', axis=1)
+
+    try:
+        # replace medians with stddevs per requirement
+        agg = df.groupby(['dim', 'solver']).agg(
+            std_time=('time_median', lambda x: pd.to_numeric(x, errors='coerce').std()),
+            mean_time=('time_mean', lambda x: pd.to_numeric(x, errors='coerce').mean()),
+            std_obj=('obj_median', lambda x: pd.to_numeric(x, errors='coerce').std()),
+            mean_obj=('obj_mean', lambda x: pd.to_numeric(x, errors='coerce').mean()),
+            avg_opt_rate=('optimality_rate', lambda x: pd.to_numeric(x, errors='coerce').mean())
+        ).reset_index()
+    except Exception:
+        # coerce and retry
+        for c in ['time_median', 'time_mean', 'obj_median', 'obj_mean', 'optimality_rate']:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors='coerce')
+        agg = df.groupby(['dim', 'solver']).agg(
+            std_time=('time_median', 'std'),
+            mean_time=('time_mean', 'mean'),
+            std_obj=('obj_median', 'std'),
+            mean_obj=('obj_mean', 'mean'),
+            avg_opt_rate=('optimality_rate', 'mean')
+        ).reset_index()
+
+    out = agg.pivot(index='dim', columns='solver')
+    out.columns = [f"{col[1]}_{col[0]}" for col in out.columns]
+    out = out.reset_index()
+
+    # coerce all numeric output columns
+    for c in out.columns:
+        if c != 'dim':
+            out[c] = pd.to_numeric(out[c], errors='coerce')
+
+    out.to_csv(Path(tables_dir) / 'global_scalability.csv', index=False)
+
+
+def generate_additional_plots(df: pd.DataFrame, graphics_dir: Path):
+    graphics_dir = Path(graphics_dir)
+    graphics_dir.mkdir(parents=True, exist_ok=True)
+    sns.set_theme(style="whitegrid", palette="muted")
+
+    # coerce numeric columns used for plotting
+    df = df.copy()
+    for c in ['Total_Tasks', 'time_median', 'time_mean', 'obj_median', 'obj_mean', 'optimality_rate']:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+
+    ag = df.groupby(['Total_Tasks', 'solver'])['time_median'].median().reset_index()
+    ag = ag.dropna(subset=['Total_Tasks'])
+    plt.figure(figsize=(8, 5))
+    if not ag.empty:
+        sns.lineplot(data=ag, x='Total_Tasks', y='time_median', hue='solver', marker='o')
+        plt.xlabel('Total Tasks (J*M)')
+        plt.ylabel('Median Time (s)')
+        plt.title('Scaling: Median Time vs Total Tasks')
+        plt.tight_layout()
+        plt.savefig(Path(graphics_dir) / 'scaling_plot_time.png', dpi=150)
+        plt.close()
+    else:
+        plt.text(0.5, 0.5, 'No data for scaling plot', ha='center')
+        plt.savefig(Path(graphics_dir) / 'scaling_plot_time.png', dpi=150)
+        plt.close()
+
+    df['dim'] = df.apply(lambda r: f"{int(r['J'])}x{int(r['M'])}" if pd.notna(r['J']) and pd.notna(r['M']) else 'unknown', axis=1)
+    # compute average optimality rate per (variant,dim,solver) — coerce to numeric before mean
+    opt = df.groupby(['variant', 'dim', 'solver']).agg(optimality_rate_raw=('optimality_rate', lambda x: pd.to_numeric(x, errors='coerce').mean())).reset_index().rename(columns={'optimality_rate_raw':'optimality_rate'})
+    cp = opt[opt['solver'] == 'cp'].set_index(['variant', 'dim'])['optimality_rate'].unstack(level=0)
+    milp = opt[opt['solver'] == 'milp'].set_index(['variant', 'dim'])['optimality_rate'].unstack(level=0)
+    # robust subtraction with fill_value to avoid NaNs
+    diff = cp.sub(milp, fill_value=0)
+    plt.figure(figsize=(10, max(4, diff.shape[0]*0.5)))
+    sns.heatmap(diff, annot=True, fmt='.1f', cmap='coolwarm', center=0)
+    plt.xlabel('Variant')
+    plt.ylabel('Dimensions (JxM)')
+    plt.title('Optimality Rate Delta (CP - MILP)')
+    plt.tight_layout()
+    plt.savefig(Path(graphics_dir) / 'optimality_heatmap.png', dpi=150)
+    plt.close()
+
+    inst = df.pivot_table(index=['variant', 'instance_name', 'dim'], columns='solver', values=['obj_median', 'most_freq_status'], aggfunc={'obj_median':'mean', 'most_freq_status':'first'})
+    inst.columns = [f"{col[1]}_{col[0]}" for col in inst.columns]
+    inst = inst.reset_index()
+    mask = (
+        (inst.get('cp_most_freq_status').isin(['FEASIBLE', 'TIME_LIMIT'])) |
+        (inst.get('milp_most_freq_status').isin(['FEASIBLE', 'TIME_LIMIT']))
+    ) & inst['cp_obj_median'].notna() & inst['milp_obj_median'].notna()
+    inst_sub = inst[mask].copy()
+    if not inst_sub.empty:
+        # ((milp_obj - cp_obj) / cp_obj) * 100 -> positive means MILP worse (CP better)
+        inst_sub['rel_gap'] = ((inst_sub['milp_obj_median'] - inst_sub['cp_obj_median']) / inst_sub['cp_obj_median']) * 100
+        plt.figure(figsize=(10, 6))
+        sns.boxplot(x='variant', y='rel_gap', data=inst_sub)
+        plt.axhline(0, linestyle='--', color='grey')
+        plt.ylabel('Relative Gap % ((MILP-CP)/CP)')
+        plt.title('Objective Gap for Time-limited Instances')
+        plt.tight_layout()
+        plt.savefig(Path(graphics_dir) / 'gap_analysis_boxplot.png', dpi=150)
+        plt.close()
+
+
 def run_full_analysis(results_root: Path, tables_dir: Path, graphics_dir: Path):
     """Convenience function to run the full pipeline: load, aggregate tables, and generate plots.
 
@@ -358,3 +714,70 @@ def run_full_analysis(results_root: Path, tables_dir: Path, graphics_dir: Path):
     print(f"Wrote graphics to {boxplot_file}, {status_file}, {makespan_file}")
 
     return summary_file, robustness_file, boxplot_file, status_file, makespan_file
+
+
+def run_deep_analysis(results_root: Path, tables_dir: Path, graphics_dir: Path):
+    """High-level entry to run the new deep analysis and produce tables and plots.
+
+    This version defensively coerces all non-categorical columns to numeric (non-convertible -> NaN)
+    to avoid pandas raising "dtype 'str' does not support operation 'mean'" during groupby/agg.
+    """
+    instances_root = Path(__file__).parent.parent / 'instances'
+    print(f"Instances root: {instances_root}")
+    master = build_master_dataframe(results_root, instances_root)
+
+    # Define categorical columns we must preserve
+    categorical_cols = {
+        'variant', 'solver', 'instance_name', 'file_path', 'size', 'most_freq_status',
+        'rep_times', 'rep_objs', 'rep_statuses', 'instance_path'
+    }
+
+    # Coerce everything else to numeric (strings that look numeric will convert; others -> NaN)
+    for col in list(master.columns):
+        if col in categorical_cols:
+            continue
+        try:
+            master[col] = pd.to_numeric(master[col], errors='coerce')
+        except Exception:
+            # if conversion fails for unexpected reason, leave original column
+            pass
+
+    # Quick diagnostics
+    print('Master frame columns and dtypes:')
+    try:
+        print(master.dtypes)
+    except Exception:
+        print('Unable to print dtypes')
+
+    for c in ['time_median', 'time_mean', 'obj_median', 'obj_mean', 'Total_Tasks', 'optimality_rate']:
+        if c in master.columns:
+            n_total = len(master)
+            n_nonnull = int(master[c].notna().sum())
+            print(f"Column {c}: {n_nonnull}/{n_total} non-null after coercion; dtype={master[c].dtype}")
+
+    # Run generation steps with diagnostics on failure
+    try:
+        generate_variant_deep_dive(master, tables_dir)
+        generate_global_scalability(master, tables_dir)
+        generate_additional_plots(master, graphics_dir)
+    except Exception as e:
+        print('\nERROR during deep analysis:')
+        print(repr(e))
+        print('\nMaster frame sample:')
+        try:
+            print(master.head(10))
+        except Exception:
+            pass
+        print('\nMaster dtypes:')
+        try:
+            print(master.dtypes)
+        except Exception:
+            pass
+        # try to show first non-numeric entries for key columns
+        keys = ['time_median', 'time_mean', 'obj_median', 'obj_mean', 'optimality_rate', 'Total_Tasks']
+        for k in keys:
+            if k in master.columns:
+                non_numeric = master[~master[k].apply(lambda v: pd.isna(v) or isinstance(v, (int, float, np.floating, np.integer)))][k]
+                if not non_numeric.empty:
+                    print(f"First non-numeric values in {k} (showing up to 10):\n", non_numeric.head(10))
+        raise
