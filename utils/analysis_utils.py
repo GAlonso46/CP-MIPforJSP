@@ -637,63 +637,91 @@ def generate_additional_plots(df: pd.DataFrame, graphics_dir: Path):
     graphics_dir.mkdir(parents=True, exist_ok=True)
     sns.set_theme(style="whitegrid", palette="muted")
 
-    # coerce numeric columns used for plotting
+    # 1. Copy and type cleaning for numeric columns
     df = df.copy()
-    for c in ['Total_Tasks', 'time_median', 'time_mean', 'obj_median', 'obj_mean', 'optimality_rate']:
+    numeric_cols = ['Total_Tasks', 'time_median', 'time_mean', 'obj_median', 'obj_mean', 'optimality_rate', 'obj_std']
+    for c in numeric_cols:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors='coerce')
 
-    ag = df.groupby(['Total_Tasks', 'solver'])['time_median'].median().reset_index()
+    # 2. Scaling Plot
+    # Group by Total_Tasks and Solver using the mean of time_mean
+    ag = df.groupby(['Total_Tasks', 'solver'])['time_mean'].mean().reset_index()
     ag = ag.dropna(subset=['Total_Tasks'])
+    
     plt.figure(figsize=(8, 5))
     if not ag.empty:
-        sns.lineplot(data=ag, x='Total_Tasks', y='time_median', hue='solver', marker='o')
+        sns.lineplot(data=ag, x='Total_Tasks', y='time_mean', hue='solver', marker='o')
         plt.xlabel('Total Tasks (J*M)')
-        plt.ylabel('Median Time (s)')
-        plt.title('Scaling: Median Time vs Total Tasks')
+        plt.ylabel('Mean Time (s)')
+        plt.title('Scaling: Mean Resolution Time vs Problem Size')
         plt.tight_layout()
-        plt.savefig(Path(graphics_dir) / 'scaling_plot_time.png', dpi=150)
-        plt.close()
-    else:
-        plt.text(0.5, 0.5, 'No data for scaling plot', ha='center')
-        plt.savefig(Path(graphics_dir) / 'scaling_plot_time.png', dpi=150)
-        plt.close()
-
-    df['dim'] = df.apply(lambda r: f"{int(r['J'])}x{int(r['M'])}" if pd.notna(r['J']) and pd.notna(r['M']) else 'unknown', axis=1)
-    # compute average optimality rate per (variant,dim,solver) — coerce to numeric before mean
-    opt = df.groupby(['variant', 'dim', 'solver']).agg(optimality_rate_raw=('optimality_rate', lambda x: pd.to_numeric(x, errors='coerce').mean())).reset_index().rename(columns={'optimality_rate_raw':'optimality_rate'})
-    cp = opt[opt['solver'] == 'cp'].set_index(['variant', 'dim'])['optimality_rate'].unstack(level=0)
-    milp = opt[opt['solver'] == 'milp'].set_index(['variant', 'dim'])['optimality_rate'].unstack(level=0)
-    # robust subtraction with fill_value to avoid NaNs
-    diff = cp.sub(milp, fill_value=0)
-    plt.figure(figsize=(10, max(4, diff.shape[0]*0.5)))
-    sns.heatmap(diff, annot=True, fmt='.1f', cmap='coolwarm', center=0)
-    plt.xlabel('Variant')
-    plt.ylabel('Dimensions (JxM)')
-    plt.title('Optimality Rate Delta (CP - MILP)')
-    plt.tight_layout()
-    plt.savefig(Path(graphics_dir) / 'optimality_heatmap.png', dpi=150)
+        plt.savefig(graphics_dir / 'scaling_plot_time.png', dpi=150)
     plt.close()
 
-    inst = df.pivot_table(index=['variant', 'instance_name', 'dim'], columns='solver', values=['obj_median', 'most_freq_status'], aggfunc={'obj_median':'mean', 'most_freq_status':'first'})
+    # 3. Optimality Heatmap
+    # Ensure 'dim' exists as string to avoid type errors
+    df['dim'] = df.apply(lambda r: f"{int(r['J'])}x{int(r['M'])}" if pd.notna(r['J']) and pd.notna(r['M']) else 'unknown', axis=1)
+    
+    opt = df.groupby(['variant', 'dim', 'solver'])['optimality_rate'].mean().reset_index()
+    
+    # Safe pivot for the Heatmap
+    opt_pivot = opt.pivot_table(index='dim', columns=['variant', 'solver'], values='optimality_rate')
+    
+    # Extract CP and MILP separately for subtraction
+    cp_vals = opt_pivot.xs('cp', level='solver', axis=1)
+    milp_vals = opt_pivot.xs('milp', level='solver', axis=1)
+    
+    # Robust subtraction (CP - MILP): Positive means CP is better at finding optima
+    diff = cp_vals.sub(milp_vals, fill_value=0)
+    
+    plt.figure(figsize=(12, max(4, diff.shape[0] * 0.4)))
+    sns.heatmap(diff, annot=True, fmt='.1f', cmap='coolwarm', center=0)
+    plt.title('Optimality Rate Delta (CP % - MILP %)')
+    plt.tight_layout()
+    plt.savefig(graphics_dir / 'optimality_heatmap.png', dpi=150)
+    plt.close()
+
+    # 4. Relative Gap Analysis (Boxplot)
+    # Pivot table with explicit aggfunc to avoid errors with 'most_freq_status' (NoneType/isin)
+    inst = df.pivot_table(
+        index=['variant', 'instance_name', 'dim'], 
+        columns='solver', 
+        values=['obj_mean', 'most_freq_status'],
+        aggfunc={'obj_mean': 'mean', 'most_freq_status': 'first'}
+    )
+    
+    # Flatten columns: ['cp_obj_mean', 'milp_obj_mean', 'cp_most_freq_status', ...]
     inst.columns = [f"{col[1]}_{col[0]}" for col in inst.columns]
     inst = inst.reset_index()
-    mask = (
-        (inst.get('cp_most_freq_status').isin(['FEASIBLE', 'TIME_LIMIT'])) |
-        (inst.get('milp_most_freq_status').isin(['FEASIBLE', 'TIME_LIMIT']))
-    ) & inst['cp_obj_median'].notna() & inst['milp_obj_median'].notna()
-    inst_sub = inst[mask].copy()
-    if not inst_sub.empty:
-        # ((milp_obj - cp_obj) / cp_obj) * 100 -> positive means MILP worse (CP better)
-        inst_sub['rel_gap'] = ((inst_sub['milp_obj_median'] - inst_sub['cp_obj_median']) / inst_sub['cp_obj_median']) * 100
-        plt.figure(figsize=(10, 6))
-        sns.boxplot(x='variant', y='rel_gap', data=inst_sub)
-        plt.axhline(0, linestyle='--', color='grey')
-        plt.ylabel('Relative Gap % ((MILP-CP)/CP)')
-        plt.title('Objective Gap for Time-limited Instances')
-        plt.tight_layout()
-        plt.savefig(Path(graphics_dir) / 'gap_analysis_boxplot.png', dpi=150)
-        plt.close()
+
+    # Safety check to prevent 'AttributeError' in .isin()
+    status_cols = ['cp_most_freq_status', 'milp_most_freq_status']
+    if all(col in inst.columns for col in status_cols):
+        # Convert to string and fill NAs so .isin() does not fail if Nones exist
+        for col in status_cols:
+            inst[col] = inst[col].astype(str).replace('nan', 'UNKNOWN')
+
+        mask = (
+            (inst['cp_most_freq_status'].isin(['FEASIBLE', 'TIME_LIMIT'])) |
+            (inst['milp_most_freq_status'].isin(['FEASIBLE', 'TIME_LIMIT']))
+        ) & inst['cp_obj_mean'].notna() & inst['milp_obj_mean'].notna()
+        
+        inst_sub = inst[mask].copy()
+        
+        if not inst_sub.empty:
+            # Formula: (MILP - CP) / CP * 100. Positive = CP better (lower makespan)
+            inst_sub['rel_gap'] = ((inst_sub['milp_obj_mean'] - inst_sub['cp_obj_mean']) / inst_sub['cp_obj_mean']) * 100
+            
+            plt.figure(figsize=(10, 6))
+            sns.boxplot(x='variant', y='rel_gap', data=inst_sub)
+            plt.axhline(0, linestyle='--', color='black', alpha=0.5)
+            plt.ylabel('Relative Gap % ((MILP - CP) / CP)')
+            plt.title('Solution Quality Gap (Instances with Time Limit)')
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            plt.savefig(graphics_dir / 'gap_analysis_boxplot.png', dpi=150)
+    plt.close()
 
 
 def run_full_analysis(results_root: Path, tables_dir: Path, graphics_dir: Path):
