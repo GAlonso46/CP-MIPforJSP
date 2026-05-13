@@ -524,49 +524,51 @@ def build_master_dataframe(results_root: Path, instances_root: Path) -> pd.DataF
 
 
 def generate_variant_deep_dive(df: pd.DataFrame, tables_dir: Path):
-    """Create per-variant deep-dive CSV tables grouped by instance dimensions with custom formatting."""
+    """
+    Create three specialized CSV tables per variant using concise column abbreviations:
+    Table 1 (Time), Table 2 (Objective), and Table 3 (Optimality).
+    """
     tables_dir = Path(tables_dir)
     tables_dir.mkdir(parents=True, exist_ok=True)
     
     for variant, group in df.groupby('variant'):
         group = group.copy()
         
-        # Ensure instance_name is string to avoid NaN in counting
+        # Ensure instance_name is string to avoid NaN during unique counting
         if 'instance_name' in group.columns:
             group['instance_name'] = group['instance_name'].astype(str)
 
-        # Coerce numeric columns
+        # Coerce required columns to numeric for aggregation
         num_cols = ['time_mean', 'time_median', 'time_std', 'obj_mean', 'obj_median', 'obj_std', 'Total_Tasks', 'optimality_rate']
         for c in num_cols:
             if c in group.columns:
                 group[c] = pd.to_numeric(group[c], errors='coerce')
 
+        # Construct the dimension identifier (e.g., "10x5")
         group['dim'] = group.apply(lambda r: f"{int(r['J'])}x{int(r['M'])}" if pd.notna(r['J']) and pd.notna(r['M']) else 'unknown', axis=1)
         
         cols = ['dim', 'instance_name', 'solver', 'time_mean', 'time_median', 'time_std', 'obj_mean', 'obj_median', 'obj_std', 'count_optimal', 'count_feasible', 'optimality_rate']
         sub = group[[c for c in cols if c in group.columns]]
 
-        # Aggregation with the specific names requested
+        # Aggregation using specific short names to match requested final columns
         agg = sub.groupby(['dim', 'solver']).agg(
             instances_count=('instance_name', 'nunique'),
-            mean_t_mean=('time_mean', 'mean'),
+            m_t_m=('time_mean', 'mean'),
             std_t=('time_median', 'std'),
-            mean_obj_mean=('obj_mean', 'mean'),
-            std_obj=('obj_median', 'std'),
-            std_time_mean=('time_std', 'mean'),
-            std_obj_mean=('obj_std', 'mean'),
+            std_t_m=('time_std', 'mean'),
+            m_o_m=('obj_mean', 'mean'),
+            std_o=('obj_median', 'std'),
+            std_o_m=('obj_std', 'mean'),
             opt=('count_optimal', 'sum'),
-            feasible=('count_feasible', 'sum'),
+            feas=('count_feasible', 'sum'),
             avg_opt=('optimality_rate', 'mean')
         ).reset_index()
 
-        # Pivot the data
+        # Pivot to separate CP and MILP results
         pivot = agg.pivot(index='dim', columns='solver')
-        
-        # Flatten columns: e.g., (mean_t_mean, cp) -> cp_mean_t_mean
         pivot.columns = [f"{col[1]}_{col[0]}" for col in pivot.columns]
         
-        # Create the single 'count' column (taking it from cp or milp since they are identical)
+        # Consolidate instances_count into a single 'count' column
         if 'cp_instances_count' in pivot.columns:
             pivot.rename(columns={'cp_instances_count': 'count'}, inplace=True)
             if 'milp_instances_count' in pivot.columns:
@@ -574,28 +576,22 @@ def generate_variant_deep_dive(df: pd.DataFrame, tables_dir: Path):
         
         pivot = pivot.reset_index()
 
-        # Define the exact order of columns as per your example
-        desired_order = [
-            'dim', 'count',
-            'cp_mean_t_mean', 'milp_mean_t_mean',
-            'cp_std_t', 'milp_std_t',
-            'cp_mean_obj_mean', 'milp_mean_obj_mean',
-            'cp_std_obj', 'milp_std_obj',
-            'cp_std_t_mean', 'milp_std_t_mean',
-            'cp_std_obj_mean', 'milp_std_obj_mean',
-            'cp_opt', 'milp_opt',
-            'cp_feas', 'milp_feas',
-            'cp_avg_opt', 'milp_avg_opt'
-        ]
+        # --- Table 1: Computational Time Metrics ---
+        time_cols = ['dim', 'count', 'cp_m_t_m', 'milp_m_t_m', 'cp_std_t', 'milp_std_t', 'cp_std_t_m', 'milp_std_t_m']
+        df_time = pivot[[c for c in time_cols if c in pivot.columns]]
+        df_time.to_csv(tables_dir / f"variant_{variant}_time.csv", index=False)
 
-        # Filter order to include only existing columns to avoid errors
-        final_cols = [c for c in desired_order if c in pivot.columns]
-        pivot = pivot[final_cols]
+        # --- Table 2: Objective Function Values ---
+        obj_cols = ['dim', 'count', 'cp_m_o_m', 'milp_m_o_m', 'cp_std_o', 'milp_std_o', 'cp_std_o_m', 'milp_std_o_m']
+        df_obj = pivot[[c for c in obj_cols if c in pivot.columns]]
+        df_obj.to_csv(tables_dir / f"variant_{variant}_objective.csv", index=False)
 
-        out_file = tables_dir / f"variant_deep_dive_{variant}.csv"
-        pivot.to_csv(out_file, index=False)
+        # --- Table 3: Optimality and Statistics ---
+        opt_cols = ['dim', 'count', 'cp_opt', 'milp_opt', 'cp_feas', 'milp_feas', 'cp_avg_opt', 'milp_avg_opt']
+        df_opt = pivot[[c for c in opt_cols if c in pivot.columns]]
+        df_opt.to_csv(tables_dir / f"variant_{variant}_optimality.csv", index=False)
 
-
+        
 def generate_global_scalability(df: pd.DataFrame, tables_dir: Path):
     tables_dir = Path(tables_dir)
     tables_dir.mkdir(parents=True, exist_ok=True)
