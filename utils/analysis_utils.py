@@ -524,66 +524,76 @@ def build_master_dataframe(results_root: Path, instances_root: Path) -> pd.DataF
 
 
 def generate_variant_deep_dive(df: pd.DataFrame, tables_dir: Path):
-    """Create per-variant deep-dive CSV tables grouped by instance dimensions."""
+    """Create per-variant deep-dive CSV tables grouped by instance dimensions with custom formatting."""
     tables_dir = Path(tables_dir)
     tables_dir.mkdir(parents=True, exist_ok=True)
+    
     for variant, group in df.groupby('variant'):
         group = group.copy()
-        # coerce numeric columns that will be aggregated
+        
+        # Ensure instance_name is string to avoid NaN in counting
+        if 'instance_name' in group.columns:
+            group['instance_name'] = group['instance_name'].astype(str)
+
+        # Coerce numeric columns
         num_cols = ['time_mean', 'time_median', 'time_std', 'obj_mean', 'obj_median', 'obj_std', 'Total_Tasks', 'optimality_rate']
         for c in num_cols:
             if c in group.columns:
                 group[c] = pd.to_numeric(group[c], errors='coerce')
 
         group['dim'] = group.apply(lambda r: f"{int(r['J'])}x{int(r['M'])}" if pd.notna(r['J']) and pd.notna(r['M']) else 'unknown', axis=1)
-        cols = ['dim', 'instance_name', 'solver', 'time_mean', 'time_median', 'time_std', 'obj_mean', 'obj_median', 'obj_std', 'count_optimal', 'count_feasible', 'optimality_rate', 'Total_Tasks']
+        
+        cols = ['dim', 'instance_name', 'solver', 'time_mean', 'time_median', 'time_std', 'obj_mean', 'obj_median', 'obj_std', 'count_optimal', 'count_feasible', 'optimality_rate']
         sub = group[[c for c in cols if c in group.columns]]
 
-        # do aggregation with retry on dtype issues
-        try:
-            # use std (stddev) instead of median per new requirements
-            agg = sub.groupby(['dim', 'solver']).agg(
-                instances_count=('instance_name', 'nunique'),
-                mean_time_mean=('time_mean', lambda x: pd.to_numeric(x, errors='coerce').mean()),
-                std_time=('time_median', lambda x: pd.to_numeric(x, errors='coerce').std()),
-                mean_obj_mean=('obj_mean', lambda x: pd.to_numeric(x, errors='coerce').mean()),
-                std_obj=('obj_median', lambda x: pd.to_numeric(x, errors='coerce').std()),
-                std_time_mean=('time_std', lambda x: pd.to_numeric(x, errors='coerce').mean()),
-                std_obj_mean=('obj_std', lambda x: pd.to_numeric(x, errors='coerce').mean()),
-                total_optimal_count=('count_optimal', 'sum'),
-                total_feasible_count=('count_feasible', 'sum'),
-                avg_opt_rate=('optimality_rate', lambda x: pd.to_numeric(x, errors='coerce').mean()),
-                avg_total_tasks=('Total_Tasks', lambda x: pd.to_numeric(x, errors='coerce').mean())
-            ).reset_index()
-        except Exception as e:
-            # coerce any object columns and retry
-            for c in num_cols:
-                if c in sub.columns:
-                    sub[c] = pd.to_numeric(sub[c], errors='coerce')
-            agg = sub.groupby(['dim', 'solver']).agg(
-                instances_count=('instance_name', 'nunique'),
-                mean_time_mean=('time_mean', 'mean'),
-                std_time=('time_median', 'std'),
-                std_time_mean=('time_std', 'mean'),
-                mean_obj_mean=('obj_mean', 'mean'),
-                std_obj=('obj_median', 'std'),
-                std_obj_mean=('obj_std', 'mean'),
-                total_optimal_count=('count_optimal', 'sum'),
-                total_feasible_count=('count_feasible', 'sum'),
-                avg_opt_rate=('optimality_rate', 'mean'),
-                avg_total_tasks=('Total_Tasks', 'mean')
-            ).reset_index()
+        # Aggregation with the specific names requested
+        agg = sub.groupby(['dim', 'solver']).agg(
+            instances_count=('instance_name', 'nunique'),
+            mean_t_mean=('time_mean', 'mean'),
+            std_t=('time_median', 'std'),
+            mean_obj_mean=('obj_mean', 'mean'),
+            std_obj=('obj_median', 'std'),
+            std_time_mean=('time_std', 'mean'),
+            std_obj_mean=('obj_std', 'mean'),
+            opt=('count_optimal', 'sum'),
+            feasible=('count_feasible', 'sum'),
+            avg_opt=('optimality_rate', 'mean')
+        ).reset_index()
 
-        # ensure numeric result columns are numeric
-        for c in ['mean_time_mean', 'std_time', 'std_time_mean', 'mean_obj_mean', 'std_obj', 'std_obj_mean', 'avg_opt_rate', 'avg_total_tasks']:
-            if c in agg.columns:
-                agg[c] = pd.to_numeric(agg[c], errors='coerce')
-
+        # Pivot the data
         pivot = agg.pivot(index='dim', columns='solver')
-        # flatten columns safely
+        
+        # Flatten columns: e.g., (mean_t_mean, cp) -> cp_mean_t_mean
         pivot.columns = [f"{col[1]}_{col[0]}" for col in pivot.columns]
-        out_file = Path(tables_dir) / f"variant_deep_dive_{variant}.csv"
-        pivot.to_csv(out_file)
+        
+        # Create the single 'count' column (taking it from cp or milp since they are identical)
+        if 'cp_instances_count' in pivot.columns:
+            pivot.rename(columns={'cp_instances_count': 'count'}, inplace=True)
+            if 'milp_instances_count' in pivot.columns:
+                pivot.drop(columns=['milp_instances_count'], inplace=True)
+        
+        pivot = pivot.reset_index()
+
+        # Define the exact order of columns as per your example
+        desired_order = [
+            'dim', 'count',
+            'cp_mean_t_mean', 'milp_mean_t_mean',
+            'cp_std_t', 'milp_std_t',
+            'cp_mean_obj_mean', 'milp_mean_obj_mean',
+            'cp_std_obj', 'milp_std_obj',
+            'cp_std_t_mean', 'milp_std_t_mean',
+            'cp_std_obj_mean', 'milp_std_obj_mean',
+            'cp_opt', 'milp_opt',
+            'cp_feas', 'milp_feas',
+            'cp_avg_opt', 'milp_avg_opt'
+        ]
+
+        # Filter order to include only existing columns to avoid errors
+        final_cols = [c for c in desired_order if c in pivot.columns]
+        pivot = pivot[final_cols]
+
+        out_file = tables_dir / f"variant_deep_dive_{variant}.csv"
+        pivot.to_csv(out_file, index=False)
 
 
 def generate_global_scalability(df: pd.DataFrame, tables_dir: Path):
