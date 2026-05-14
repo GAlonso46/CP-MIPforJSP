@@ -576,6 +576,9 @@ def generate_variant_deep_dive(df: pd.DataFrame, tables_dir: Path):
         
         pivot = pivot.reset_index()
 
+        # Rounding to 4 decimal places for clean table visualization
+        pivot = pivot.round(4)
+
         # --- Table 1: Computational Time Metrics ---
         time_cols = ['dim', 'count', 'cp_m_t_m', 'milp_m_t_m', 'cp_std_t', 'milp_std_t', 'cp_std_t_m', 'milp_std_t_m']
         df_time = pivot[[c for c in time_cols if c in pivot.columns]]
