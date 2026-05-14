@@ -74,12 +74,6 @@ def load_all_results(results_root: Path) -> pd.DataFrame:
 
     The returned DataFrame has one row per instance per solver and includes repetition-level
     aggregated statistics as well as raw repetitions in lists.
-
-    Columns include:
-      - variant, instance_name, file_path, size
-      - solver ('cp' or 'milp')
-      - rep_times (list), rep_objs (list), rep_statuses (list)
-      - median_time, std_time, median_obj, std_obj, most_freq_status
     """
     records = []
     results_root = Path(results_root)
@@ -96,22 +90,16 @@ def load_all_results(results_root: Path) -> pd.DataFrame:
                 with file.open('r', encoding='utf-8') as f:
                     data = json.load(f)
             except Exception:
-                # skip malformed files
                 continue
 
             instance_name = Path(data.get('instance', str(file))).name
-            # sometimes instance field contains path; take stem if trailing path
             instance_stem = Path(instance_name).stem
             size = _detect_size_from_name(instance_stem)
-
-            # preserve the original instance path string when available so downstream code can
-            # resolve the instance file; fall back to the actual result file path
             instance_path_val = data.get('instance', str(file))
 
             for solver in ('cp', 'milp'):
                 solver_obj = data.get(solver)
                 if not solver_obj:
-                    # produce empty record
                     records.append({
                         'variant': variant_dir.name,
                         'instance_name': instance_stem,
@@ -131,11 +119,28 @@ def load_all_results(results_root: Path) -> pd.DataFrame:
                     continue
 
                 reps = solver_obj.get('reps', [])
-                times = [r.get('time') for r in reps if r.get('time') is not None]
-                objs = [r.get('obj') if 'obj' in r else r.get('obj_val') for r in reps]
-                statuses = [r.get('status') for r in reps]
+                
+                # --- START OF STATUS NORMALIZATION LOGIC ---
+                normalized_reps = []
+                for r in reps:
+                    # Clone repetition to avoid mutating original data if needed
+                    r_copy = r.copy()
+                    status = r_copy.get('status')
+                    # Get objective value from either 'obj' or 'obj_val'
+                    obj_val = r_copy.get('obj') if 'obj' in r_copy else r_copy.get('obj_val')
+                    
+                    # If status is TIME_LIMIT but an objective value exists, treat as FEASIBLE
+                    if status == 'TIME_LIMIT' and obj_val is not None:
+                        r_copy['status'] = 'FEASIBLE'
+                    
+                    normalized_reps.append(r_copy)
+                # --- END OF STATUS NORMALIZATION LOGIC ---
 
-                # convert times/objs to numeric arrays, keeping None as NaN
+                times = [r.get('time') for r in normalized_reps if r.get('time') is not None]
+                objs = [r.get('obj') if 'obj' in r else r.get('obj_val') for r in normalized_reps]
+                statuses = [r.get('status') for r in normalized_reps]
+
+                # Convert to numeric arrays
                 times_arr = pd.to_numeric(pd.Series(times), errors='coerce') if times else pd.Series([], dtype=float)
                 objs_series = pd.to_numeric(pd.Series(objs), errors='coerce') if objs else pd.Series([], dtype=float)
 
@@ -143,7 +148,9 @@ def load_all_results(results_root: Path) -> pd.DataFrame:
                 std_time = float(times_arr.std(ddof=0)) if not times_arr.empty else np.nan
                 median_obj = float(objs_series.median()) if not objs_series.empty and not objs_series.dropna().empty else np.nan
                 std_obj = float(objs_series.std(ddof=0)) if not objs_series.empty and not objs_series.dropna().empty else np.nan
-                most_freq = _most_frequent_status(reps)
+                
+                # Use the normalized repetitions for the most frequent status
+                most_freq = _most_frequent_status(normalized_reps)
 
                 records.append({
                     'variant': variant_dir.name,
@@ -164,8 +171,6 @@ def load_all_results(results_root: Path) -> pd.DataFrame:
 
     df = pd.DataFrame.from_records(records)
 
-    # Ensure numeric columns are numeric: some records can contain strings (from malformed JSON
-    # or inconsistent typing). Coerce to numeric and replace non-convertible entries with NaN.
     for col in ('median_time', 'std_time', 'median_obj', 'std_obj'):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
