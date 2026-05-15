@@ -673,6 +673,35 @@ def generate_additional_plots(df: pd.DataFrame, graphics_dir: Path):
         plt.savefig(graphics_dir / 'scaling_plot_time.png', dpi=150)
     plt.close()
 
+        # --- Additional: per-variant scaling plots (one PNG per variant) ---
+    try:
+        variants = df['variant'].dropna().unique() if 'variant' in df.columns else []
+        for var in variants:
+            sub = df[df['variant'] == var]
+            if sub.empty:
+                continue
+            ag_var = sub.groupby(['Total_Tasks', 'solver'])['time_mean'].mean().reset_index()
+            ag_var = ag_var.dropna(subset=['Total_Tasks'])
+            if ag_var.empty:
+                continue
+            plt.figure(figsize=(8, 5))
+            sns.lineplot(data=ag_var, x='Total_Tasks', y='time_mean', hue='solver', marker='o')
+            plt.xlabel('Total Tasks (J*M)')
+            plt.ylabel('Mean Time (s)')
+            plt.title(f"Scaling: Mean Resolution Time vs Problem Size — {var}")
+            plt.tight_layout()
+                        # sanitize variant name for filename (replace problematic chars)
+            try:
+                safe_var = re.sub(r"[^\w\-_. ]", '_', str(var))
+            except Exception:
+                safe_var = str(var).replace(' ', '_').replace('/', '_')
+            out_path = graphics_dir / f"scaling_plot_time_{safe_var}.png"
+            plt.savefig(out_path, dpi=150)
+            plt.close()
+    except Exception:
+        # plotting should not break the analysis pipeline; log silently
+        pass
+
     # 3. Optimality Heatmap
     # Ensure 'dim' exists as string to avoid type errors
     df['dim'] = df.apply(lambda r: f"{int(r['J'])}x{int(r['M'])}" if pd.notna(r['J']) and pd.notna(r['M']) else 'unknown', axis=1)
