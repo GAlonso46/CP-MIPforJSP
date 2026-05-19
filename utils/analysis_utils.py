@@ -852,3 +852,119 @@ def run_deep_analysis(results_root: Path, tables_dir: Path, graphics_dir: Path):
                 if not non_numeric.empty:
                     print(f"First non-numeric values in {k} (showing up to 10):\n", non_numeric.head(10))
         raise
+
+
+def generate_instances_solved_table(results_root: Path, tables_dir: Path):
+    """Generate a CSV table listing all instances (across variants) with solver-level
+    median computation time and stddev of computation time.
+
+    Output columns:
+      - variant
+      - instance_name (file name)
+      - dim (JxM)
+      - cp_median_time, cp_std_time, milp_median_time, milp_std_time (NaN when missing)
+
+    Uses `build_master_dataframe` to obtain per-solver records and pivots them per-instance.
+    """
+    tables_dir = Path(tables_dir)
+    tables_dir.mkdir(parents=True, exist_ok=True)
+
+    instances_root = Path(__file__).parent.parent / 'instances'
+    master = build_master_dataframe(results_root, instances_root)
+
+    # Ensure 'variant' exists: infer from file_path if missing
+    if 'variant' not in master.columns or master['variant'].isna().all():
+        if 'file_path' in master.columns:
+            master['variant'] = master['file_path'].apply(lambda p: Path(str(p)).parent.name if pd.notna(p) and str(p) != '' else 'unknown')
+        else:
+            master['variant'] = 'unknown'
+
+    # Ensure instance_name exists: prefer existing, then instance_path, then file_path stem
+    if 'instance_name' not in master.columns or master['instance_name'].isna().all():
+        if 'instance_path' in master.columns:
+            master['instance_name'] = master['instance_path'].apply(lambda p: Path(str(p)).name if pd.notna(p) and str(p) != '' else '')
+        elif 'file_path' in master.columns:
+            master['instance_name'] = master['file_path'].apply(lambda p: Path(str(p)).stem if pd.notna(p) and str(p) != '' else '')
+        else:
+            master['instance_name'] = ''
+
+    # Ensure J and M exist and create dim
+    if 'J' not in master.columns or 'M' not in master.columns:
+        master['J'] = np.nan
+        master['M'] = np.nan
+    master['J'] = pd.to_numeric(master['J'], errors='coerce')
+    master['M'] = pd.to_numeric(master['M'], errors='coerce')
+    master['dim'] = master.apply(lambda r: f"{int(r['J'])}x{int(r['M'])}" if pd.notna(r['J']) and pd.notna(r['M']) else 'unknown', axis=1)
+
+    # Ensure time_median and time_std exist; compute from rep_times if necessary
+    if 'time_median' not in master.columns or master['time_median'].isna().all():
+        if 'rep_times' in master.columns:
+            master['time_median'] = master['rep_times'].apply(lambda reps: pd.to_numeric(pd.Series(reps), errors='coerce').median() if reps else np.nan)
+    if 'time_std' not in master.columns or master['time_std'].isna().all():
+        if 'rep_times' in master.columns:
+            master['time_std'] = master['rep_times'].apply(lambda reps: pd.to_numeric(pd.Series(reps), errors='coerce').std(ddof=0) if reps else np.nan)
+
+    # Coerce numeric columns
+    for c in ['time_median', 'time_std']:
+        if c in master.columns:
+            master[c] = pd.to_numeric(master[c], errors='coerce')
+
+    # Pivot per instance and variant: bring solver rows into columns for time_median and time_std
+    inst_pivot = None
+    try:
+        inst_pivot = master.pivot_table(
+            index=['variant', 'instance_name', 'dim'],
+            columns='solver',
+            values=['time_median', 'time_std'],
+            aggfunc='first'
+        )
+    except Exception:
+        try:
+            master['solver'] = master['solver'].astype(str)
+            inst_pivot = master.pivot_table(
+                index=['variant', 'instance_name', 'dim'],
+                columns='solver',
+                values=['time_median', 'time_std'],
+                aggfunc='first'
+            )
+        except Exception:
+            inst_pivot = None
+
+    # If pivot failed or produced empty solver-level columns, try groupby-unstack
+    if inst_pivot is None or inst_pivot.shape[1] == 0:
+        try:
+            gb = master.set_index(['variant', 'instance_name', 'dim', 'solver'])[['time_median', 'time_std']]
+            inst_pivot = gb.unstack(level='solver')
+        except Exception:
+            # fallback: minimal table with identifiers only
+            out = master[['variant', 'instance_name', 'dim']].drop_duplicates().reset_index(drop=True)
+            out_file = tables_dir / 'instances_solved_table.csv'
+            out.to_csv(out_file, index=False)
+            return out_file
+
+    # Flatten multiindex columns to e.g. 'cp_time_median'
+    if isinstance(inst_pivot.columns, pd.MultiIndex):
+        inst_pivot.columns = [f"{col[1]}_{col[0]}" for col in inst_pivot.columns]
+    else:
+        inst_pivot = inst_pivot.rename(columns=lambda s: f"{s}")
+
+    out = inst_pivot.reset_index()
+
+    # Normalize column names: 'cp_time_median' -> 'cp_median_time', 'cp_time_std' -> 'cp_std_time'
+    rename_map = {}
+    for c in out.columns:
+        if isinstance(c, str):
+            newc = c.replace('_time_median', '_median_time').replace('_time_std', '_std_time')
+            if newc != c:
+                rename_map[c] = newc
+    if rename_map:
+        out = out.rename(columns=rename_map)
+
+    # Round numeric columns for presentation
+    for col in out.columns:
+        if any(k in col for k in ('median_time', 'std_time')):
+            out[col] = pd.to_numeric(out[col], errors='coerce').round(6)
+
+    out_file = tables_dir / 'instances_solved_table.csv'
+    out.to_csv(out_file, index=False)
+    return out_file
