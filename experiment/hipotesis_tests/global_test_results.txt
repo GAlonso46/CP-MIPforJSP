@@ -1,0 +1,24 @@
+Global paired hypothesis tests (CP vs MILP)
+==================================================
+Number of paired instances: 335
+
+Differences (CP - MILP):
+  mean = -28.471364
+  median = -1.486003
+
+Shapiro-Wilk test for normality of differences (H0: differences ~ N):
+  statistic = 0.546103
+  p-value   = 1.543814e-28
+  alpha     = 0.05
+  Interpretation: Reject H0 (not normal)
+
+Wilcoxon signed-rank test on paired samples (H0: median difference = 0):
+  statistic = 13112.000000
+  p-value   = 2.425295e-17
+  alpha     = 0.05
+  Interpretation: Reject H0 (significant difference)
+
+Notes:
+ - Shapiro-Wilk null hypothesis: differences are normally distributed.
+ - Wilcoxon null hypothesis: median of paired differences is zero (non-parametric paired test).
+ - alpha = 0.050
