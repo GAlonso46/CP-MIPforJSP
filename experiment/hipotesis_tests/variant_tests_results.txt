@@ -1,0 +1,110 @@
+Variant-specific paired tests (after filtering censored ties)
+======================================================================
+
+Total rows after filtering: 335
+Note: rows where BOTH cp_median_time >= 600 AND milp_median_time >= 600 were removed.
+
+----------------------------------------------------------------------
+Variant: drc_jssp
+Sample size (pairs) after filtering: 43
+  mean(diff = CP - MILP)   = -202.659104
+  median(diff)             = -18.247362
+  Shapiro-Wilk test on differences:
+    statistic = 0.669943
+    p-value   = 1.453583e-08
+    Interpretation: Reject normality (p < 0.05) -> differences not normal
+
+  Wilcoxon signed-rank test (alternative='less'):
+    statistic = 30.000000
+    p-value   = 2.313527e-10
+    Interpretation: Reject H0 at alpha=0.05: evidence that CP is faster (CP < MILP)
+
+----------------------------------------------------------------------
+Variant: sdst_jssp
+Sample size (pairs) after filtering: 45
+  mean(diff = CP - MILP)   = -143.784728
+  median(diff)             = -5.294194
+  Shapiro-Wilk test on differences:
+    statistic = 0.607205
+    p-value   = 9.522531e-10
+    Interpretation: Reject normality (p < 0.05) -> differences not normal
+
+  Wilcoxon signed-rank test (alternative='less'):
+    statistic = 0.000000
+    p-value   = 2.842171e-14
+    Interpretation: Reject H0 at alpha=0.05: evidence that CP is faster (CP < MILP)
+
+----------------------------------------------------------------------
+Variant: f_jssp
+Sample size (pairs) after filtering: 41
+  mean(diff = CP - MILP)   = 58.106835
+  median(diff)             = 0.045592
+  Shapiro-Wilk test on differences:
+    statistic = 0.581911
+    p-value   = 1.326655e-09
+    Interpretation: Reject normality (p < 0.05) -> differences not normal
+
+  Wilcoxon signed-rank test (alternative='greater'):
+    statistic = 555.000000
+    p-value   = 5.432483e-02
+    Interpretation: Fail to reject H0 at alpha=0.05: no evidence that MILP is faster
+
+----------------------------------------------------------------------
+Variant: basic_jssp
+Sample size (pairs) after filtering: 50
+  mean(diff = CP - MILP)   = 20.976118
+  median(diff)             = -1.199453
+  Shapiro-Wilk test on differences:
+    statistic = 0.418857
+    p-value   = 8.644114e-13
+    Interpretation: Reject normality (p < 0.05) -> differences not normal
+
+  Wilcoxon signed-rank test (alternative='two-sided'):
+    statistic = 413.000000
+    p-value   = 2.972732e-02
+    Interpretation: Reject H0 at alpha=0.05: evidence of a difference between CP and MILP
+
+----------------------------------------------------------------------
+Variant: d_jssp
+Sample size (pairs) after filtering: 56
+  mean(diff = CP - MILP)   = 26.870341
+  median(diff)             = -1.204229
+  Shapiro-Wilk test on differences:
+    statistic = 0.324770
+    p-value   = 1.302568e-14
+    Interpretation: Reject normality (p < 0.05) -> differences not normal
+
+  Wilcoxon signed-rank test (alternative='two-sided'):
+    statistic = 477.000000
+    p-value   = 8.833694e-03
+    Interpretation: Reject H0 at alpha=0.05: evidence of a difference between CP and MILP
+
+----------------------------------------------------------------------
+Variant: r_jssp
+Sample size (pairs) after filtering: 50
+  mean(diff = CP - MILP)   = 2.712304
+  median(diff)             = -1.253682
+  Shapiro-Wilk test on differences:
+    statistic = 0.496019
+    p-value   = 7.343450e-12
+    Interpretation: Reject normality (p < 0.05) -> differences not normal
+
+  Wilcoxon signed-rank test (alternative='two-sided'):
+    statistic = 258.000000
+    p-value   = 1.490361e-04
+    Interpretation: Reject H0 at alpha=0.05: evidence of a difference between CP and MILP
+
+----------------------------------------------------------------------
+Variant: t_jssp
+Sample size (pairs) after filtering: 50
+  mean(diff = CP - MILP)   = 11.504135
+  median(diff)             = -1.244512
+  Shapiro-Wilk test on differences:
+    statistic = 0.411696
+    p-value   = 7.161396e-13
+    Interpretation: Reject normality (p < 0.05) -> differences not normal
+
+  Wilcoxon signed-rank test (alternative='two-sided'):
+    statistic = 349.000000
+    p-value   = 4.757047e-03
+    Interpretation: Reject H0 at alpha=0.05: evidence of a difference between CP and MILP
