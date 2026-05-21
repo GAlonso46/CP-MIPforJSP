@@ -1,0 +1,175 @@
+# Advanced JSSP Hypothesis Testing Results
+
+PHASE 1: Medium-Size Subset Hypothesis Testing
+======================================================================
+Medium-size dimensions: ['8x8', '10x5', '15x5', '20x5', '10x10']
+Total rows after filtering: 125
+
+------------------------------------------------------------
+Variant: drc_jssp
+Sample size: 13
+  mean(diff = CP - MILP):   -574.495157
+  median(diff):            -599.746847
+  Shapiro-Wilk test on differences:
+    statistic = 0.714353
+    p-value   = 7.752632e-04
+    Interpretation: Reject normality (p < 0.05)
+
+  Wilcoxon signed-rank test (alternative='less'):
+    statistic = 0.000000
+    p-value   = 1.220703e-04
+    Conclusion: Reject H0: CP is faster (CP < MILP)
+
+------------------------------------------------------------
+Variant: sdst_jssp
+Sample size: 15
+  mean(diff = CP - MILP):   -425.578175
+  median(diff):            -529.145449
+  Shapiro-Wilk test on differences:
+    statistic = 0.759103
+    p-value   = 1.150292e-03
+    Interpretation: Reject normality (p < 0.05)
+
+  Wilcoxon signed-rank test (alternative='less'):
+    statistic = 0.000000
+    p-value   = 3.051758e-05
+    Conclusion: Reject H0: CP is faster (CP < MILP)
+
+------------------------------------------------------------
+Variant: f_jssp
+Sample size: 11
+  mean(diff = CP - MILP):   217.169946
+  median(diff):            177.848287
+  Shapiro-Wilk test on differences:
+    statistic = 0.942975
+    p-value   = 5.560771e-01
+    Interpretation: Fail to reject normality (p >= 0.05)
+
+  Wilcoxon signed-rank test (alternative='greater'):
+    statistic = 66.000000
+    p-value   = 4.882812e-04
+    Conclusion: Reject H0: MILP is faster (CP > MILP)
+
+------------------------------------------------------------
+Variant: basic_jssp
+Sample size: 20
+  mean(diff = CP - MILP):   55.717576
+  median(diff):            -12.444118
+  Shapiro-Wilk test on differences:
+    statistic = 0.635364
+    p-value   = 7.002695e-06
+    Interpretation: Reject normality (p < 0.05)
+
+  Wilcoxon signed-rank test (alternative='two-sided'):
+    statistic = 67.000000
+    p-value   = 1.649570e-01
+    Conclusion: Fail to reject H0: no evidence of a difference
+
+------------------------------------------------------------
+Variant: d_jssp
+Sample size: 26
+  mean(diff = CP - MILP):   60.238703
+  median(diff):            -6.695761
+  Shapiro-Wilk test on differences:
+    statistic = 0.485352
+    p-value   = 1.789239e-08
+    Interpretation: Reject normality (p < 0.05)
+
+  Wilcoxon signed-rank test (alternative='two-sided'):
+    statistic = 174.000000
+    p-value   = 9.800839e-01
+    Conclusion: Fail to reject H0: no evidence of a difference
+
+------------------------------------------------------------
+Variant: r_jssp
+Sample size: 20
+  mean(diff = CP - MILP):   10.072958
+  median(diff):            -13.077076
+  Shapiro-Wilk test on differences:
+    statistic = 0.663998
+    p-value   = 1.464266e-05
+    Interpretation: Reject normality (p < 0.05)
+
+  Wilcoxon signed-rank test (alternative='two-sided'):
+    statistic = 78.000000
+    p-value   = 3.299828e-01
+    Conclusion: Fail to reject H0: no evidence of a difference
+
+------------------------------------------------------------
+Variant: t_jssp
+Sample size: 20
+  mean(diff = CP - MILP):   32.054351
+  median(diff):            -11.914520
+  Shapiro-Wilk test on differences:
+    statistic = 0.619935
+    p-value   = 4.771086e-06
+    Interpretation: Reject normality (p < 0.05)
+
+  Wilcoxon signed-rank test (alternative='two-sided'):
+    statistic = 91.000000
+    p-value   = 6.215134e-01
+    Conclusion: Fail to reject H0: no evidence of a difference
+
+
+================================================================================
+
+PHASE 2: Scalability Trend Analysis (Spearman Correlation)
+======================================================================
+complexity = jobs * machines (parsed from 'dim' column)
+time_gap = milp_median_time - cp_median_time
+
+------------------------------------------------------------
+Variant: drc_jssp
+Sample size: 43
+  (after removing missing complexity/time_gap: 43)
+  Spearman rho = 0.743656
+  p-value      = 1.107964e-08
+  Conclusion: Reject H0: rho > 0 (MILP time increases faster with size)
+
+------------------------------------------------------------
+Variant: sdst_jssp
+Sample size: 45
+  (after removing missing complexity/time_gap: 45)
+  Spearman rho = 0.964202
+  p-value      = 2.038364e-26
+  Conclusion: Reject H0: rho > 0 (MILP time increases faster with size)
+
+------------------------------------------------------------
+Variant: f_jssp
+Sample size: 41
+  (after removing missing complexity/time_gap: 41)
+  Spearman rho = -0.514127
+  p-value      = 5.849728e-04
+  Conclusion: Reject H0: rho < 0 (CP time increases faster with size)
+
+------------------------------------------------------------
+Variant: basic_jssp
+Sample size: 50
+  (after removing missing complexity/time_gap: 50)
+  Spearman rho = 0.311889
+  p-value      = 2.745889e-02
+  Conclusion: Reject H0: significant monotonic association (rho != 0)
+
+------------------------------------------------------------
+Variant: d_jssp
+Sample size: 56
+  (after removing missing complexity/time_gap: 56)
+  Spearman rho = 0.221034
+  p-value      = 1.016147e-01
+  Conclusion: Fail to reject H0: no significant monotonic association
+
+------------------------------------------------------------
+Variant: r_jssp
+Sample size: 50
+  (after removing missing complexity/time_gap: 50)
+  Spearman rho = 0.561010
+  p-value      = 2.256736e-05
+  Conclusion: Reject H0: significant monotonic association (rho != 0)
+
+------------------------------------------------------------
+Variant: t_jssp
+Sample size: 50
+  (after removing missing complexity/time_gap: 50)
+  Spearman rho = 0.405676
+  p-value      = 3.468727e-03
+  Conclusion: Reject H0: significant monotonic association (rho != 0)
